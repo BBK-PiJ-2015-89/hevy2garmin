@@ -600,6 +600,7 @@ async def dashboard(request: Request):
             _db.set_app_config("hevy_total", {"count": hevy_total})
     except Exception:
         pass
+    pending_count = max(0, hevy_total - terminal_count)
     mapping_count = 0
     try:
         from hevy2garmin.mapper import HEVY_TO_GARMIN, _custom_mappings, _ensure_custom_loaded
@@ -638,6 +639,7 @@ async def dashboard(request: Request):
         synced_count=synced_count,
         matched_count=matched_count,
         terminal_count=terminal_count,
+        pending_count=pending_count,
         manual_count=terminal_counts["manual"],
         skipped_count=terminal_counts["skipped"],
         hevy_total=hevy_total,

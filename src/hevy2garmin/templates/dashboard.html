@@ -100,7 +100,7 @@
         <div class="stat-label">Skipped</div>
     </div>
     <div class="stat-card">
-        {% set pending = hevy_total - terminal_count %}
+        {% set pending = pending_count %}
         <div class="stat-value {% if pending > 0 %}amber{% endif %}" id="stat-pending">{{ pending }}</div>
         <div class="stat-label">Pending</div>
     </div>
@@ -121,7 +121,7 @@
     <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
         <button id="sync-now-btn" class="btn btn-primary btn-sm" onclick="syncNow()" style="flex-shrink: 0;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-            {% set pending = hevy_total - terminal_count %}{% if pending > 1 %}Sync {{ pending }} Workouts{% elif pending == 1 %}Sync 1 Workout{% else %}Sync Now{% endif %}
+            {% set pending = pending_count %}{% if pending > 1 %}Sync {{ pending }} Workouts{% elif pending == 1 %}Sync 1 Workout{% else %}Sync Now{% endif %}
         </button>
         <button id="sync-stop-btn" class="btn btn-secondary btn-sm" onclick="stopSync()" style="display: none; flex-shrink: 0;">Stop</button>
         <div id="sync-progress" style="flex: 1; display: none;">
@@ -134,7 +134,7 @@
             </div>
         </div>
     </div>
-    {% set pending = hevy_total - terminal_count %}
+    {% set pending = pending_count %}
     {% if pending > 1 %}
     <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.6;">
         Uploads one workout at a time (~{{ ((pending * 8) / 60) | round(0) | int }} min for {{ pending }}).

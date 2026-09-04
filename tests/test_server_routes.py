@@ -48,6 +48,40 @@ def demo_client():
         yield TestClient(srv.app)
 
 
+class TestDashboardStats:
+    """GET / — dashboard counters."""
+
+    def test_pending_count_never_goes_below_zero(self, client) -> None:
+        class FakeDB:
+            def get_app_config(self, key):
+                if key == "hevy_total":
+                    return {"count": 2}
+                return None
+
+        terminal_counts = {
+            "uploaded": 3,
+            "manual": 0,
+            "skipped": 0,
+            "terminal": 3,
+        }
+        with patch.object(srv, "load_config", lambda: {}), \
+             patch.object(srv.db, "get_terminal_counts", lambda: terminal_counts), \
+             patch.object(srv.db, "get_recent_synced", lambda limit: []), \
+             patch.object(srv.db, "get_database_url", lambda: None), \
+             patch.object(srv.db, "get_db", lambda: FakeDB()), \
+             patch.object(srv, "cooldown_remaining", lambda store: 0), \
+             patch.object(srv.db, "get_routine_stats", lambda: {"synced": 0, "scheduled": 0}), \
+             patch.object(srv.db, "get_recent_synced_routines", lambda limit: []), \
+             patch.object(srv.db, "get_app_config", lambda key: None), \
+             patch.object(srv.db, "get_sync_log", lambda limit: []), \
+             patch.object(autosync, "status", lambda: {"enabled": False, "interval_minutes": 120}):
+            r = client.get("/")
+
+        assert r.status_code == 200
+        assert 'id="stat-pending">0</div>' in r.text
+        assert ">-1</div>" not in r.text
+
+
 class TestUnsyncOne:
     """POST /api/unsync/{hevy_id} — drops a sync record so it can re-sync."""
 
