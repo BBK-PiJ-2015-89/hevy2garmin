@@ -82,6 +82,10 @@ class Database(ABC):
         """Remove all sync records. Returns count of deleted records."""
 
     @abstractmethod
+    def prune_workouts_not_in(self, active_hevy_ids: list[str]) -> int:
+        """Remove sync records for workouts that no longer exist in Hevy."""
+
+    @abstractmethod
     def get_app_config(self, key: str) -> dict | None:
         """Get a JSON value from the generic key-value app cache."""
 

@@ -428,6 +428,17 @@ class SQLiteDatabase(Database):
         conn.close()
         return count
 
+    def prune_workouts_not_in(self, active_hevy_ids: list[str]) -> int:
+        keep = {str(hevy_id) for hevy_id in active_hevy_ids if hevy_id}
+        conn = self._get_conn()
+        rows = conn.execute("SELECT hevy_id FROM synced_workouts").fetchall()
+        stale = [row[0] for row in rows if row[0] not in keep]
+        for hevy_id in stale:
+            conn.execute("DELETE FROM synced_workouts WHERE hevy_id = ?", (hevy_id,))
+        conn.commit()
+        conn.close()
+        return len(stale)
+
     def get_synced_count(self) -> int:
         conn = self._get_conn()
         count = conn.execute("SELECT COUNT(*) FROM synced_workouts").fetchone()[0]

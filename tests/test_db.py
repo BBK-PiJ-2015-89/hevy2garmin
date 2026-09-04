@@ -280,6 +280,17 @@ class TestSyncTracking:
         assert count == 3
         assert db.get_synced_count() == 0
 
+    def test_prune_workouts_not_in_removes_deleted_hevy_rows(self, tmp_path: Path) -> None:
+        db = SQLiteDatabase(tmp_path / "test.db")
+        db.mark_synced("w1", title="Keep")
+        db.mark_synced("w2", title="Deleted")
+        db.mark_synced("w3", title="Also Keep")
+
+        assert db.prune_workouts_not_in(["w1", "w3"]) == 1
+        assert db.is_synced("w1") is True
+        assert db.is_synced("w2") is False
+        assert db.is_synced("w3") is True
+
     def test_app_config_roundtrip(self, tmp_path: Path) -> None:
         db = SQLiteDatabase(tmp_path / "test.db")
         assert db.get_app_config("missing") is None
@@ -319,6 +330,14 @@ class TestPostgresBackend:
         db.mark_synced("pg-w1", title="Push")
         db.mark_synced("pg-w2", title="Pull")
         assert db.get_synced_count() == 2
+
+    def test_prune_workouts_not_in(self, tmp_path: Path) -> None:
+        db = _make_db(tmp_path)
+        db.mark_synced("pg-w1", title="Keep")
+        db.mark_synced("pg-w2", title="Deleted")
+        assert db.prune_workouts_not_in(["pg-w1"]) == 1
+        assert db.is_synced("pg-w1") is True
+        assert db.is_synced("pg-w2") is False
 
     def test_idempotent_mark(self, tmp_path: Path) -> None:
         db = _make_db(tmp_path)

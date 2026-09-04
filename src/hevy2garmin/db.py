@@ -98,6 +98,11 @@ def unsync_all(**kw) -> int:
     return get_db().unsync_all()
 
 
+def prune_workouts_not_in(active_hevy_ids: list[str], **kw) -> int:
+    """Remove sync records for workouts that no longer exist in Hevy."""
+    return get_db().prune_workouts_not_in(active_hevy_ids)
+
+
 def get_synced_count(**kw) -> int:
     """Get total number of synced workouts."""
     return get_db().get_synced_count()

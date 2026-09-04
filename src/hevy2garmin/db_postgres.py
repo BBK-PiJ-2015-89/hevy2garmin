@@ -439,6 +439,22 @@ class PostgresDatabase(Database):
             conn.commit()
         return count
 
+    def prune_workouts_not_in(self, active_hevy_ids: list[str]) -> int:
+        keep = {str(hevy_id) for hevy_id in active_hevy_ids if hevy_id}
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT hevy_id FROM synced_workouts")
+                stale = [
+                    row["hevy_id"]
+                    for row in cur.fetchall()
+                    if row["hevy_id"] not in keep
+                ]
+                if stale:
+                    cur.execute("DELETE FROM synced_workouts WHERE hevy_id = ANY(%s)", (stale,))
+                count = cur.rowcount if stale else 0
+            conn.commit()
+        return count
+
     def get_synced_count(self) -> int:
         with self._get_conn() as conn:
             with conn.cursor() as cur:

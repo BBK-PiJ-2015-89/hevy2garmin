@@ -33,6 +33,36 @@ def test_reload_clears_page_caches_and_refreshes(client):
     assert all(val == {} for _, val in cleared)
 
 
+def test_reload_prunes_deleted_hevy_workout_records(client):
+    fake_db = MagicMock()
+    mock_hevy = MagicMock()
+    mock_hevy.get_workout_count.return_value = 2
+    mock_hevy.get_all_workouts.return_value = [{"id": "w1"}, {"id": "w3"}]
+    with patch("hevy2garmin.server.is_configured", return_value=True), \
+         patch("hevy2garmin.server.is_demo_mode", return_value=False), \
+         patch("hevy2garmin.hevy.HevyClient", return_value=mock_hevy), \
+         patch("hevy2garmin.server.db.get_db", return_value=fake_db):
+        resp = client.post("/api/reload-data")
+
+    assert resp.headers.get("HX-Refresh") == "true"
+    fake_db.prune_workouts_not_in.assert_called_once_with(["w1", "w3"])
+
+
+def test_reload_does_not_prune_if_hevy_list_is_incomplete(client):
+    fake_db = MagicMock()
+    mock_hevy = MagicMock()
+    mock_hevy.get_workout_count.return_value = 2
+    mock_hevy.get_all_workouts.return_value = [{"id": "w1"}]
+    with patch("hevy2garmin.server.is_configured", return_value=True), \
+         patch("hevy2garmin.server.is_demo_mode", return_value=False), \
+         patch("hevy2garmin.hevy.HevyClient", return_value=mock_hevy), \
+         patch("hevy2garmin.server.db.get_db", return_value=fake_db):
+        resp = client.post("/api/reload-data")
+
+    assert resp.headers.get("HX-Refresh") == "true"
+    fake_db.prune_workouts_not_in.assert_not_called()
+
+
 def test_reload_blocked_in_demo(client):
     with patch("hevy2garmin.server.is_configured", return_value=True), \
          patch("hevy2garmin.server.is_demo_mode", return_value=True):

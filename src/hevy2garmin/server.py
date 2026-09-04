@@ -1309,6 +1309,34 @@ def _save_strava_credentials(
         logger.warning("Failed to persist Strava credentials to DB: %s", e)
 
 
+def _prune_deleted_hevy_workouts(store: Any, hevy_client: Any, total: int) -> int:
+    """Drop local sync rows for workouts that no longer exist in Hevy."""
+    if not hasattr(store, "prune_workouts_not_in"):
+        return 0
+    try:
+        workouts = hevy_client.get_all_workouts(page_size=10)
+        active_ids = [
+            str(w.get("id"))
+            for w in workouts
+            if isinstance(w, dict) and w.get("id")
+        ]
+        if len(active_ids) != total:
+            logger.warning(
+                "Reload data skipped deleted-workout cleanup: Hevy count is %s "
+                "but fetched %s workout ids",
+                total,
+                len(active_ids),
+            )
+            return 0
+        pruned = store.prune_workouts_not_in(active_ids)
+        if pruned:
+            logger.info("Reload data removed %d deleted Hevy workout sync records", pruned)
+        return pruned
+    except Exception:
+        logger.debug("Reload data could not prune deleted Hevy workouts", exc_info=True)
+        return 0
+
+
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     config = load_config()
@@ -1488,8 +1516,10 @@ async def api_reload_data(request: Request):
     try:
         from hevy2garmin.hevy import HevyClient
         _db = db.get_db()
-        total = HevyClient(api_key=config.get("hevy_api_key")).get_workout_count()
+        hevy = HevyClient(api_key=config.get("hevy_api_key"))
+        total = hevy.get_workout_count()
         _db.set_app_config("hevy_total", {"count": total})
+        _prune_deleted_hevy_workouts(_db, hevy, total)
         for pg in range(1, (total // 10) + 2):
             _db.set_app_config(f"hevy_workouts_page_{pg}", {})
         global _unmapped_cache
