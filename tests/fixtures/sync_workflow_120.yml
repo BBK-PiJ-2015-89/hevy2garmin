@@ -25,4 +25,8 @@ jobs:
       - name: Sync
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          STRAVA_VISUAL_STRENGTH_UPLOAD: ${{ secrets.STRAVA_VISUAL_STRENGTH_UPLOAD }}
+          STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}
+          STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
+          STRAVA_REFRESH_TOKEN: ${{ secrets.STRAVA_REFRESH_TOKEN }}
         run: hevy2garmin sync

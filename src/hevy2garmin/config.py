@@ -44,6 +44,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "hr_fusion": {
         "enabled": True,
     },
+    "strava": {
+        # Optional: upload a second structured strength activity to Strava so
+        # Strava can render the visual exercise/set log. Garmin sync is unchanged.
+        "visual_strength_upload": False,
+        "client_id": "",
+        "client_secret": "",
+        "refresh_token": "",
+    },
     "merge_activity_types": ["strength_training"],
     # What to do when a workout was recorded on a watch. One activity in every
     # case (#159):
@@ -84,7 +92,7 @@ def load_config() -> dict[str, Any]:
                 with _db._get_conn() as conn:
                     with conn.cursor() as cur:
                         # Credentials
-                        cur.execute("SELECT platform, credentials FROM platform_credentials WHERE platform IN ('hevy', 'garmin')")
+                        cur.execute("SELECT platform, credentials FROM platform_credentials WHERE platform IN ('hevy', 'garmin', 'strava')")
                         for row in cur.fetchall():
                             creds = row["credentials"] if isinstance(row["credentials"], dict) else json.loads(row["credentials"])
                             if row["platform"] == "hevy" and creds.get("api_key"):
@@ -94,14 +102,22 @@ def load_config() -> dict[str, Any]:
                                     config["garmin_email"] = creds["email"]
                                 if creds.get("password"):
                                     config["garmin_password"] = creds["password"]
+                            elif row["platform"] == "strava":
+                                config.setdefault("strava", {}).update({
+                                    k: creds[k]
+                                    for k in ("client_id", "client_secret", "refresh_token")
+                                    if creds.get(k)
+                                })
                         # App settings
-                        cur.execute("SELECT key, value FROM app_cache WHERE key IN ('user_profile', 'timing', 'hr_fusion', 'merge_settings')")
+                        cur.execute("SELECT key, value FROM app_cache WHERE key IN ('user_profile', 'timing', 'hr_fusion', 'merge_settings', 'strava_settings')")
                         for row in cur.fetchall():
                             val = row["value"] if isinstance(row["value"], dict) else json.loads(row["value"])
                             if row["key"] == "merge_settings":
                                 # Unpack merge_settings into top-level keys
                                 for mk, mv in val.items():
                                     config[mk] = mv
+                            elif row["key"] == "strava_settings":
+                                config.setdefault("strava", {}).update(val)
                             elif row["key"] in config and isinstance(config[row["key"]], dict):
                                 config[row["key"]].update(val)
                             else:
@@ -117,6 +133,17 @@ def load_config() -> dict[str, Any]:
         config["garmin_email"] = os.environ["GARMIN_EMAIL"]
     if not config.get("garmin_password") and os.environ.get("GARMIN_PASSWORD"):
         config["garmin_password"] = os.environ["GARMIN_PASSWORD"]
+    strava = config.setdefault("strava", {})
+    env_visual = os.environ.get("STRAVA_VISUAL_STRENGTH_UPLOAD")
+    if env_visual is not None:
+        strava["visual_strength_upload"] = env_visual.strip().lower() in ("1", "true", "yes", "on")
+    for key, env_name in (
+        ("client_id", "STRAVA_CLIENT_ID"),
+        ("client_secret", "STRAVA_CLIENT_SECRET"),
+        ("refresh_token", "STRAVA_REFRESH_TOKEN"),
+    ):
+        if not strava.get(key) and os.environ.get(env_name):
+            strava[key] = os.environ[env_name]
 
     # Normalize credential whitespace. A stray leading/trailing newline (the classic
     # copy-paste mistake) breaks the API call, and on the Vercel deploy the stored DB
@@ -125,6 +152,9 @@ def load_config() -> dict[str, Any]:
     for _cred in ("hevy_api_key", "garmin_email", "garmin_password"):
         if isinstance(config.get(_cred), str):
             config[_cred] = config[_cred].strip()
+    for _cred in ("client_id", "client_secret", "refresh_token"):
+        if isinstance(strava.get(_cred), str):
+            strava[_cred] = strava[_cred].strip()
 
     return config
 
@@ -159,6 +189,16 @@ def save_config(config: dict[str, Any]) -> None:
                 value = config.get(key)
                 if isinstance(value, dict):
                     _db.set_app_config(key, value)
+            strava = config.get("strava")
+            if isinstance(strava, dict):
+                _db.set_app_config(
+                    "strava_settings",
+                    {
+                        "visual_strength_upload": bool(
+                            strava.get("visual_strength_upload")
+                        )
+                    },
+                )
     except Exception:
         logger.debug("Could not persist config to DB", exc_info=True)
 

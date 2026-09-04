@@ -31,7 +31,7 @@ interface SettingsData {
 const EMPTY: SettingsData = { dbConfigured: false, platforms: [], config: [], syncedCount: 0 };
 
 // The user-editable config the Python app persists to app_cache (config.py).
-const CONFIG_KEYS = ["user_profile", "timing", "hr_fusion", "merge_settings", "auto_sync"];
+const CONFIG_KEYS = ["user_profile", "timing", "hr_fusion", "merge_settings", "auto_sync", "strava_settings"];
 
 async function loadSettings(): Promise<SettingsData> {
   let sql: ReturnType<typeof getDb>;
@@ -128,6 +128,7 @@ export default async function SettingsPage() {
   const autoSync = cfg("auto_sync");
   const hrFusion = cfg("hr_fusion");
   const merge = cfg("merge_settings");
+  const strava = cfg("strava_settings");
   const profile = cfg("user_profile");
   const timing = cfg("timing");
   const numOrNull = (v: unknown): number | null => (v == null || v === "" ? null : Number(v));
@@ -200,6 +201,8 @@ export default async function SettingsPage() {
         <h2 className="mb-3 text-lg font-semibold text-text">Configuration</h2>
         <SettingsForm
           githubTokenSet={data.platforms.some((r) => r.platform === "github" && r.status === "active")}
+          stravaConnected={data.platforms.some((r) => r.platform === "strava" && r.status === "active")}
+          stravaVisualStrengthUpload={Boolean(strava.visual_strength_upload)}
           autoSyncEnabled={Boolean(autoSync.enabled)}
           autoSyncInterval={Number(autoSync.interval_minutes) || 120}
           hrFusionEnabled={hrFusion.enabled == null ? true : Boolean(hrFusion.enabled)}

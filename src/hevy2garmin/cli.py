@@ -318,7 +318,12 @@ def _garmin_client_from_config():
 
 def cmd_reconcile(args: argparse.Namespace) -> None:
     from hevy2garmin.sync import reconcile_pending
-    result = reconcile_pending(db.get_db(), _garmin_client_from_config(), args.hevy_id)
+    result = reconcile_pending(
+        db.get_db(),
+        _garmin_client_from_config(),
+        args.hevy_id,
+        config=load_config(),
+    )
     print(f"{args.hevy_id}: {result.status}")
 
 
@@ -332,7 +337,8 @@ def cmd_retry_failed(args: argparse.Namespace) -> None:
         print("✗ Operation is not definitively failed; reconcile or abandon it instead")
         sys.exit(1)
     from hevy2garmin.sync import reconcile_pending, sync_one_workout
-    reconcile_pending(store, _garmin_client_from_config(), args.hevy_id)
+    cfg = load_config()
+    reconcile_pending(store, _garmin_client_from_config(), args.hevy_id, config=cfg)
     pending = store.get_pending(args.hevy_id)
     if not pending or pending.get("phase") != "failed":
         print("✗ Operation is no longer eligible for retry")
@@ -342,7 +348,7 @@ def cmd_retry_failed(args: argparse.Namespace) -> None:
         print("✗ Pending operation has no recoverable workout payload")
         sys.exit(1)
     store.delete_pending(args.hevy_id)
-    result = sync_one_workout(workout, cfg=load_config(), garmin_client=_garmin_client_from_config(), force_upload=True, database=store)
+    result = sync_one_workout(workout, cfg=cfg, garmin_client=_garmin_client_from_config(), force_upload=True, database=store)
     print(f"{args.hevy_id}: {result.status}")
 
 

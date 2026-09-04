@@ -1228,6 +1228,63 @@ def _save_github_pat(pat: str) -> None:
         logger.warning("Failed to persist GitHub PAT to DB: %s", e)
 
 
+def _save_strava_credentials(
+    client_id: str,
+    client_secret: str,
+    refresh_token: str,
+) -> None:
+    """Persist Strava OAuth details to the DB (platform 'strava') on cloud."""
+    updates = {
+        k: v.strip()
+        for k, v in {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+        }.items()
+        if v and v.strip()
+    }
+    if not updates or not db.get_database_url():
+        return
+    try:
+        import json as _json
+
+        _db = db.get_db()
+        if not hasattr(_db, "_get_conn"):
+            return
+        with _db._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT credentials FROM platform_credentials WHERE platform = 'strava'"
+                )
+                row = cur.fetchone()
+                existing = {}
+                if row:
+                    existing = (
+                        row["credentials"]
+                        if isinstance(row["credentials"], dict)
+                        else _json.loads(row["credentials"])
+                    )
+                existing.update(updates)
+                status = (
+                    "active"
+                    if all(existing.get(k) for k in ("client_id", "client_secret", "refresh_token"))
+                    else "disconnected"
+                )
+                cur.execute(
+                    """
+                    INSERT INTO platform_credentials (platform, auth_type, credentials, status, connected_at)
+                    VALUES ('strava', 'oauth', %s, %s, NOW())
+                    ON CONFLICT (platform) DO UPDATE
+                       SET credentials = EXCLUDED.credentials,
+                           status = EXCLUDED.status
+                    """,
+                    (_json.dumps(existing), status),
+                )
+            conn.commit()
+    except Exception as e:
+        logger.warning("Failed to persist Strava credentials to DB: %s", e)
+
+
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     config = load_config()
@@ -1241,7 +1298,11 @@ async def settings_page(request: Request):
     merge_extra_types = ", ".join(
         t for t in config.get("merge_activity_types", ["strength_training"]) if t != "strength_training"
     )
-    return _render("settings.html", config=config, unmapped=sorted(unmapped.items(), key=lambda x: -x[1]), merge_extra_types=merge_extra_types, github_pat_set=bool(get_github_pat()), err=request.query_params.get("err"))
+    strava = config.get("strava", {})
+    strava_connected = all(
+        strava.get(k) for k in ("client_id", "client_secret", "refresh_token")
+    )
+    return _render("settings.html", config=config, unmapped=sorted(unmapped.items(), key=lambda x: -x[1]), merge_extra_types=merge_extra_types, github_pat_set=bool(get_github_pat()), strava_connected=strava_connected, err=request.query_params.get("err"))
 
 
 @app.post("/settings")
@@ -1253,6 +1314,10 @@ async def settings_save(
     working_set_seconds: int = Form(40), warmup_set_seconds: int = Form(25),
     rest_between_sets_seconds: int = Form(75), rest_between_exercises_seconds: int = Form(120),
     hr_fusion_enabled: str = Form("off"),
+    strava_visual_strength_upload: str = Form("off"),
+    strava_client_id: str = Form(""),
+    strava_client_secret: str = Form(""),
+    strava_refresh_token: str = Form(""),
     merge_mode: str = Form("off"),
     description_enabled: str = Form("off"),
     merge_overlap_pct: int = Form(70),
@@ -1280,6 +1345,13 @@ async def settings_save(
         rest_between_exercises_seconds=rest_between_exercises_seconds,
     )
     config.setdefault("hr_fusion", {})["enabled"] = hr_fusion_enabled == "on"
+    config.setdefault("strava", {})["visual_strength_upload"] = strava_visual_strength_upload == "on"
+    if strava_client_id.strip():
+        config["strava"]["client_id"] = strava_client_id.strip()
+    if strava_client_secret.strip():
+        config["strava"]["client_secret"] = strava_client_secret.strip()
+    if strava_refresh_token.strip():
+        config["strava"]["refresh_token"] = strava_refresh_token.strip()
     config["merge_mode"] = merge_mode == "on"
     config["description_enabled"] = description_enabled == "on"
     config["merge_overlap_pct"] = max(50, min(95, merge_overlap_pct))
@@ -1302,6 +1374,9 @@ async def settings_save(
             _db.set_app_config("user_profile", config["user_profile"])
             _db.set_app_config("timing", config["timing"])
             _db.set_app_config("hr_fusion", config.get("hr_fusion", {}))
+            _db.set_app_config("strava_settings", {
+                "visual_strength_upload": bool(config.get("strava", {}).get("visual_strength_upload")),
+            })
             _db.set_app_config("merge_settings", {
                 "merge_mode": config["merge_mode"],
                 "description_enabled": config["description_enabled"],
@@ -1317,6 +1392,12 @@ async def settings_save(
     # (locally it comes from the environment). Blank means "keep current" (#445).
     if github_pat.strip():
         _save_github_pat(github_pat)
+    if strava_client_id.strip() or strava_client_secret.strip() or strava_refresh_token.strip():
+        _save_strava_credentials(
+            strava_client_id,
+            strava_client_secret,
+            strava_refresh_token,
+        )
 
     return RedirectResponse("/settings", status_code=303)
 
@@ -1960,7 +2041,12 @@ async def api_reconcile_pending(request: Request, hevy_id: str):
         from hevy2garmin.garmin import get_client
         from hevy2garmin.sync import reconcile_pending
         config = load_config()
-        result = reconcile_pending(store, get_client(config.get("garmin_email")), hevy_id)
+        result = reconcile_pending(
+            store,
+            get_client(config.get("garmin_email")),
+            hevy_id,
+            config=config,
+        )
         return JSONResponse({"ok": True, "status": result.status})
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)[:1000]}, status_code=502)
@@ -1982,7 +2068,7 @@ async def api_retry_pending(request: Request, hevy_id: str):
         from hevy2garmin.garmin import get_client
         from hevy2garmin.sync import reconcile_pending, sync_one_workout
         config = load_config(); client = get_client(config.get("garmin_email"))
-        reconcile_pending(store, client, hevy_id)
+        reconcile_pending(store, client, hevy_id, config=config)
         pending = store.get_pending(hevy_id)
         if not pending or pending.get("phase") != "failed":
             return JSONResponse({"ok": False, "error": "Operation is no longer retryable"}, status_code=409)
@@ -2217,6 +2303,10 @@ def _build_sync_workflow_yaml(interval_minutes: int) -> str:
         "      - name: Sync\n"
         "        env:\n"
         "          DATABASE_URL: ${{ secrets.DATABASE_URL }}\n"
+        "          STRAVA_VISUAL_STRENGTH_UPLOAD: ${{ secrets.STRAVA_VISUAL_STRENGTH_UPLOAD }}\n"
+        "          STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}\n"
+        "          STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}\n"
+        "          STRAVA_REFRESH_TOKEN: ${{ secrets.STRAVA_REFRESH_TOKEN }}\n"
         "        run: hevy2garmin sync\n"
     )
 

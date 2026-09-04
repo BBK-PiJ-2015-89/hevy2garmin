@@ -349,6 +349,25 @@ class TestSyncOneWorkout:
                 sync_method="merge",
             )
 
+    def test_merge_success_triggers_strava_visual_upload(self, sample_workout: dict) -> None:
+        with patch("hevy2garmin.sync.db") as mock_db, \
+             patch("hevy2garmin.sync.attempt_merge") as mock_merge, \
+             patch("hevy2garmin.sync._estimate_fit_stats", return_value={"calories": 250, "avg_hr": 120}), \
+             patch("hevy2garmin.sync._try_upload_strava_visual") as mock_strava:
+            mock_merge.return_value = MergeResult(merged=True, activity_id=999)
+
+            result = sync_one_workout(
+                sample_workout,
+                cfg={"merge_mode": True, "strava": {"visual_strength_upload": True}},
+                garmin_client=MagicMock(),
+            )
+
+            assert result.status == "synced"
+            mock_db.mark_synced.assert_called_once()
+            mock_strava.assert_called_once()
+            assert mock_strava.call_args.kwargs["garmin_activity_id"] == 999
+            assert mock_strava.call_args.kwargs["calories"] == 250
+
     def test_watch_replacement_falls_back_to_merge_when_hr_unextractable(
         self, sample_workout: dict
     ) -> None:

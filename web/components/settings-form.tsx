@@ -6,6 +6,9 @@ import { useState } from "react";
 interface Props {
   /** A GitHub token is saved (platform_credentials 'github'); the value itself is never sent to the browser. */
   githubTokenSet?: boolean;
+  /** Strava OAuth details are saved (platform_credentials 'strava'); values are never sent to the browser. */
+  stravaConnected?: boolean;
+  stravaVisualStrengthUpload: boolean;
   autoSyncEnabled: boolean;
   autoSyncInterval: number;
   hrFusionEnabled: boolean;
@@ -70,6 +73,10 @@ export function SettingsForm(p: Props) {
   const router = useRouter();
   const [autoSync, setAutoSync] = useState(p.autoSyncEnabled);
   const [githubPat, setGithubPat] = useState("");
+  const [stravaVisual, setStravaVisual] = useState(p.stravaVisualStrengthUpload);
+  const [stravaClientId, setStravaClientId] = useState("");
+  const [stravaClientSecret, setStravaClientSecret] = useState("");
+  const [stravaRefreshToken, setStravaRefreshToken] = useState("");
   const [pulling, setPulling] = useState(false);
   const [pullMsg, setPullMsg] = useState<string | null>(null);
   async function pullFromGarmin() {
@@ -136,6 +143,7 @@ export function SettingsForm(p: Props) {
       const body = {
         auto_sync: { enabled: autoSync, interval_minutes: interval },
         hr_fusion: { enabled: hrFusion },
+        strava_settings: { visual_strength_upload: stravaVisual },
         merge_settings: {
           merge_watch_strategy: strategy,
           merge_mode: mergeMode,
@@ -153,6 +161,9 @@ export function SettingsForm(p: Props) {
         },
       };
       if (githubPat.trim()) (body as Record<string, unknown>).github_pat = githubPat.trim();
+      if (stravaClientId.trim()) (body as Record<string, unknown>).strava_client_id = stravaClientId.trim();
+      if (stravaClientSecret.trim()) (body as Record<string, unknown>).strava_client_secret = stravaClientSecret.trim();
+      if (stravaRefreshToken.trim()) (body as Record<string, unknown>).strava_refresh_token = stravaRefreshToken.trim();
       const res = await fetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -179,6 +190,31 @@ export function SettingsForm(p: Props) {
         <input id="github_pat" type="password" autoComplete="off" value={githubPat} onChange={(e) => setGithubPat(e.target.value)}
           placeholder={p.githubTokenSet ? "•••• saved — enter a new one to replace it" : "ghp_… (repo + workflow scope)"} className={controlCls} />
         <p className="mt-0.5 text-xs text-text-muted">Stored in your database, same row the Python dashboard uses. Needed to enable auto-sync on Vercel.</p>
+      </div>
+      <div className={cardCls}>
+        <label className="flex items-center justify-between gap-2">
+          <span className="text-sm font-semibold text-text">Strava visual strength</span>
+          <input type="checkbox" checked={stravaVisual} onChange={(e) => setStravaVisual(e.target.checked)} className="h-4 w-4 accent-teal" />
+        </label>
+        <p className="mb-3 mt-0.5 text-xs text-text-muted">Creates a second structured Strava strength activity with the exercise list and set breakdown.</p>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div>
+            <label className={labelCls} htmlFor="strava_client_id">Client ID</label>
+            <input id="strava_client_id" type="password" autoComplete="off" value={stravaClientId} onChange={(e) => setStravaClientId(e.target.value)}
+              placeholder={p.stravaConnected ? "Saved" : "Strava app client ID"} className={controlCls} />
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="strava_client_secret">Client secret</label>
+            <input id="strava_client_secret" type="password" autoComplete="off" value={stravaClientSecret} onChange={(e) => setStravaClientSecret(e.target.value)}
+              placeholder={p.stravaConnected ? "Saved" : "Strava app secret"} className={controlCls} />
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="strava_refresh_token">Refresh token</label>
+            <input id="strava_refresh_token" type="password" autoComplete="off" value={stravaRefreshToken} onChange={(e) => setStravaRefreshToken(e.target.value)}
+              placeholder={p.stravaConnected ? "Saved" : "activity:write token"} className={controlCls} />
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-text-muted">Uses Strava uploads, so new activities follow your Strava default visibility.</p>
       </div>
       {/* Sync */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

@@ -111,7 +111,13 @@ def _complete(store, hevy_id: str, payload: dict, activity_id: int) -> None:
         store.mark_synced(hevy_id=hevy_id, **terminal)
 
 
-def finalize_pending(store, client, pending: dict) -> SyncOneResult:
+def finalize_pending(
+    store,
+    client,
+    pending: dict,
+    config: dict[str, Any] | None = None,
+    hr_samples: list[dict] | None = None,
+) -> SyncOneResult:
     """Resume remote finalization from a durable checkpoint; never uploads."""
     wid = pending["hevy_id"]
     payload = pending.get("payload") or {}
@@ -154,13 +160,30 @@ def finalize_pending(store, client, pending: dict) -> SyncOneResult:
                 step = "commit"
                 store.update_pending(wid, next_step=step, last_error=None)
         _complete(store, wid, payload, activity_id)
+        workout = payload.get("workout") or {}
+        if workout:
+            _try_upload_strava_visual(
+                workout,
+                cfg=config,
+                store=store,
+                garmin_client=client,
+                garmin_activity_id=activity_id,
+                hr_samples=hr_samples,
+                calories=payload.get("calories"),
+                avg_hr=payload.get("avg_hr"),
+            )
         return SyncOneResult(status="synced", activity_id=activity_id, sync_method=payload.get("sync_method", "upload"), merge_fallback=payload.get("merge_fallback", False), calories=payload.get("calories"), avg_hr=payload.get("avg_hr"))
     except Exception as exc:
         store.update_pending(wid, phase="finalizing", next_step=step, last_error=str(exc)[:1000])
         return SyncOneResult(status="processing", activity_id=activity_id)
 
 
-def reconcile_pending(store, client, hevy_id: str) -> SyncOneResult:
+def reconcile_pending(
+    store,
+    client,
+    hevy_id: str,
+    config: dict[str, Any] | None = None,
+) -> SyncOneResult:
     """Discover an accepted activity or resume finalization without uploading."""
     pending = store.get_pending(hevy_id)
     if not pending:
@@ -168,7 +191,7 @@ def reconcile_pending(store, client, hevy_id: str) -> SyncOneResult:
     if pending.get("phase") == "failed":
         return SyncOneResult(status="failed")
     if pending.get("garmin_activity_id"):
-        return finalize_pending(store, client, pending)
+        return finalize_pending(store, client, pending, config=config)
     upload_id = pending.get("upload_id")
     if upload_id:
         for method_name in ("get_upload_status", "get_activity_from_upload"):
@@ -183,7 +206,7 @@ def reconcile_pending(store, client, hevy_id: str) -> SyncOneResult:
                 continue
             if resolved and str(resolved) not in {str(pending.get("watch_activity_id")), *map(str, pending.get("pre_upload_ids", []))}:
                 store.update_pending(hevy_id, phase="finalizing", next_step="rename", garmin_activity_id=str(resolved), resolution_source="upload_id", last_error=None)
-                return finalize_pending(store, client, store.get_pending(hevy_id))
+                return finalize_pending(store, client, store.get_pending(hevy_id), config=config)
     phase = pending.get("phase")
     attempt_count = int(pending.get("attempt_count") or 0)
     has_recovery_evidence = bool(
@@ -224,7 +247,7 @@ def reconcile_pending(store, client, hevy_id: str) -> SyncOneResult:
         return SyncOneResult(status="processing")
     activity_id = _activity_id(safe[0])
     store.update_pending(hevy_id, phase="finalizing", next_step="rename", garmin_activity_id=str(activity_id), resolution_source="snapshot", last_error=None)
-    return finalize_pending(store, client, store.get_pending(hevy_id))
+    return finalize_pending(store, client, store.get_pending(hevy_id), config=config)
 
 
 def _workout_within_grace(workout: dict, grace_minutes: int) -> bool:
@@ -287,6 +310,57 @@ def _estimate_fit_stats(workout: dict, hr_samples: list[int] | None = None) -> d
     with tempfile.TemporaryDirectory() as tmp:
         fit_path = str(Path(tmp) / f"{workout.get('id', 'workout')}.fit")
         return generate_fit(workout, hr_samples=hr_samples, output_path=fit_path)
+
+
+def _try_upload_strava_visual(
+    workout: dict,
+    *,
+    cfg: dict[str, Any] | None,
+    store: Any,
+    garmin_client: Any,
+    garmin_activity_id: int | None,
+    hr_samples: list[dict] | None,
+    calories: int | None,
+    avg_hr: int | None,
+) -> None:
+    """Best-effort Strava visual strength upload after Garmin has succeeded."""
+    try:
+        from hevy2garmin.strava import (
+            try_upload_visual_strength,
+            visual_strength_upload_enabled,
+        )
+    except Exception:
+        logger.debug("Strava visual upload unavailable", exc_info=True)
+        return
+
+    if not visual_strength_upload_enabled(cfg):
+        return
+
+    samples = hr_samples
+    if samples is None and garmin_client and garmin_activity_id:
+        try:
+            from hevy2garmin.hr import hr_for_sync
+
+            samples = hr_for_sync(
+                store,
+                garmin_client,
+                workout,
+                cfg or {},
+                _hr_limiter,
+                source_activity_id=garmin_activity_id,
+            )
+        except Exception:
+            logger.debug("Strava visual upload could not reuse Garmin HR", exc_info=True)
+            samples = None
+
+    try_upload_visual_strength(
+        workout,
+        config=cfg,
+        store=store,
+        hr_samples=samples,
+        calories=calories,
+        avg_hr=avg_hr,
+    )
 
 
 def sync_one_workout(
@@ -377,6 +451,16 @@ def sync_one_workout(
                 sync_method="merge",
             )
             logger.info("  ⚡ Enhanced → Garmin activity %s", merge_result.activity_id)
+            _try_upload_strava_visual(
+                workout,
+                cfg=cfg,
+                store=merge_store,
+                garmin_client=garmin_client,
+                garmin_activity_id=merge_result.activity_id,
+                hr_samples=None,
+                calories=fit_stats.get("calories"),
+                avg_hr=fit_stats.get("avg_hr"),
+            )
             return SyncOneResult(
                 status="synced",
                 activity_id=merge_result.activity_id,
@@ -459,6 +543,16 @@ def sync_one_workout(
                 logger.info(
                     "  ⚡ Merged sets into watch activity %s (HR preserved in place)",
                     fallback.activity_id,
+                )
+                _try_upload_strava_visual(
+                    workout,
+                    cfg=cfg,
+                    store=merge_store,
+                    garmin_client=garmin_client,
+                    garmin_activity_id=fallback.activity_id,
+                    hr_samples=None,
+                    calories=fit_stats.get("calories"),
+                    avg_hr=fit_stats.get("avg_hr"),
                 )
                 return SyncOneResult(
                     status="synced",
@@ -584,7 +678,13 @@ def sync_one_workout(
                         "watch_activity_id": str(merge_delete_id) if merge_delete_id else None,
                         "payload": pending_payload, "delete_attempt_count": 0,
                     }
-                finalized = finalize_pending(merge_store, garmin_client, pending_after)
+                finalized = finalize_pending(
+                    merge_store,
+                    garmin_client,
+                    pending_after,
+                    config=cfg,
+                    hr_samples=hr_samples,
+                )
                 finalized.no_hr = bool(hr_fusion_on and not hr_samples)
                 return finalized
             return SyncOneResult(status="processing", merge_fallback=merge_fallback)
@@ -616,6 +716,16 @@ def sync_one_workout(
                 wid,
             )
         logger.info("  ✓ Synced → Garmin activity %s", activity_id)
+        _try_upload_strava_visual(
+            workout,
+            cfg=cfg,
+            store=merge_store,
+            garmin_client=garmin_client,
+            garmin_activity_id=activity_id,
+            hr_samples=hr_samples,
+            calories=result.get("calories"),
+            avg_hr=result.get("avg_hr"),
+        )
         return SyncOneResult(
             status="synced",
             activity_id=activity_id,

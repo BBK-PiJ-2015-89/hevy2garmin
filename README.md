@@ -498,6 +498,23 @@ When hevy2garmin syncs a workout, it adds a text description to the Garmin activ
 
 This is visible in the activity details on Garmin Connect and any connected apps (Strava, etc.). Cardio exercises show distance and duration instead of weight and reps.
 
+## Strava Visual Strength Upload (opt-in)
+
+Garmin can forward the watch-recorded strength activity to Strava with HR, but Strava may not update its native exercise/set UI after hevy2garmin later enhances the Garmin activity. If you want Strava's visual strength workout log, enable **Strava Visual Strength** in Settings.
+
+When enabled, hevy2garmin leaves the Garmin sync alone and uploads a second structured **Weight Training** activity to Strava using Strava's JSON strength format. The upload includes mapped exercises, sets, reps, weights, estimated set timings, calories, and the HR stream hevy2garmin already collected for the workout when available. Runs, swims, rides, and other normal Garmin-to-Strava activities are not touched.
+
+You need a Strava API app with `activity:write` access and these values saved in Settings:
+
+```env
+STRAVA_VISUAL_STRENGTH_UPLOAD=true
+STRAVA_CLIENT_ID=
+STRAVA_CLIENT_SECRET=
+STRAVA_REFRESH_TOKEN=
+```
+
+Activities created through Strava's upload API follow your Strava default visibility. The API does not expose a per-upload privacy switch, so keep your default visibility set the way you want before turning this on.
+
 ## Enhance Watch Activities (opt-in)
 
 By default, hevy2garmin creates a new Garmin activity from your Hevy workout using your watch's daily HR monitoring (~2 min sampling). This works without any behavior change. When a matching watch-recorded workout is found and the **Replace** strategy is selected, hevy2garmin instead downloads that activity's high-resolution HR, saves a durable backup, embeds it in the named Hevy FIT, uploads the replacement, and only then deletes the watch copy. If neither the original FIT nor an existing backup is available, replacement stops and preserves the watch activity.

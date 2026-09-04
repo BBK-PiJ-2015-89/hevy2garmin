@@ -8,11 +8,21 @@ vi.mock("@/lib/auth", () => ({
 }));
 
 const writes: Array<{ key: string; value: Record<string, unknown> }> = [];
+const credentialWrites: Array<{ platform: string; value: Record<string, unknown>; status: string }> = [];
 vi.mock("@/lib/db", () => {
   const tag = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const q = strings.join("?");
     if (q.startsWith("SELECT key, value FROM app_cache")) return []; // no existing config
     if (q.startsWith("SELECT value FROM app_cache")) return [];      // saveConfigKey: no existing row
+    if (q.includes("FROM platform_credentials") && q.includes("platform = 'strava'")) return [];
+    if (q.includes("INSERT INTO platform_credentials")) {
+      credentialWrites.push({
+        platform: "strava",
+        value: values[0] as Record<string, unknown>,
+        status: values[1] as string,
+      });
+      return [];
+    }
     if (q.includes("INSERT INTO app_cache")) {
       writes.push({ key: values[0] as string, value: values[1] as Record<string, unknown> });
       return [];
@@ -38,6 +48,7 @@ function saved(key: string): Record<string, unknown> | undefined {
 
 beforeEach(() => {
   writes.length = 0;
+  credentialWrites.length = 0;
 });
 
 describe("POST /api/settings — extended config surface", () => {
@@ -81,6 +92,26 @@ describe("POST /api/settings — extended config surface", () => {
     const t = saved("timing")!;
     expect(t.working_set_seconds).toBe(46);
     expect(t.rest_between_exercises_seconds).toBe(150);
+  });
+
+  it("saves Strava visual upload settings and credentials", async () => {
+    const res = await POST(
+      req({
+        strava_settings: { visual_strength_upload: true },
+        strava_client_id: " 123 ",
+        strava_client_secret: " secret ",
+        strava_refresh_token: " refresh ",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(saved("strava_settings")).toEqual({ visual_strength_upload: true });
+    expect(credentialWrites).toEqual([
+      {
+        platform: "strava",
+        value: { client_id: "123", client_secret: "secret", refresh_token: "refresh" },
+        status: "active",
+      },
+    ]);
   });
 
   it("400 when nothing editable is provided", async () => {

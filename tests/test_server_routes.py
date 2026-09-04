@@ -363,7 +363,7 @@ class TestReconcilePending:
         with patch.object(srv.db, "get_db", lambda: FakeDB()), \
              patch.object(srv, "load_config", lambda: {}), \
              patch("hevy2garmin.garmin.get_client", lambda e: object()), \
-             patch("hevy2garmin.sync.reconcile_pending", lambda s, c, h: Result()):
+             patch("hevy2garmin.sync.reconcile_pending", lambda s, c, h, **kw: Result()):
             r = client.post("/api/pending/w1/reconcile")
         assert r.status_code == 200
         assert r.json() == {"ok": True, "status": "uploaded"}
@@ -431,7 +431,7 @@ class TestRetryPending:
         with patch.object(srv.db, "get_db", lambda: FakeDB()), \
              patch.object(srv, "load_config", lambda: {}), \
              patch("hevy2garmin.garmin.get_client", lambda e: object()), \
-             patch("hevy2garmin.sync.reconcile_pending", lambda *a: None):
+             patch("hevy2garmin.sync.reconcile_pending", lambda *a, **kw: None):
             r = client.post("/api/pending/w1/retry", data={"confirm": "w1"})
         assert r.status_code == 409
         assert "payload is unavailable" in r.json()["error"]
@@ -453,7 +453,7 @@ class TestRetryPending:
         with patch.object(srv.db, "get_db", lambda: FakeDB()), \
              patch.object(srv, "load_config", lambda: {}), \
              patch("hevy2garmin.garmin.get_client", lambda e: object()), \
-             patch("hevy2garmin.sync.reconcile_pending", lambda *a: None), \
+             patch("hevy2garmin.sync.reconcile_pending", lambda *a, **kw: None), \
              patch("hevy2garmin.sync.sync_one_workout", lambda *a, **k: Result()):
             r = client.post("/api/pending/w1/retry", data={"confirm": "w1"})
         assert r.status_code == 200

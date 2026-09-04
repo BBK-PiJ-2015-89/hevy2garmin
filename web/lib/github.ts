@@ -102,6 +102,10 @@ export function buildSyncWorkflowYaml(intervalMinutes: number): string {
     "      - name: Sync\n" +
     "        env:\n" +
     "          DATABASE_URL: ${{ secrets.DATABASE_URL }}\n" +
+    "          STRAVA_VISUAL_STRENGTH_UPLOAD: ${{ secrets.STRAVA_VISUAL_STRENGTH_UPLOAD }}\n" +
+    "          STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}\n" +
+    "          STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}\n" +
+    "          STRAVA_REFRESH_TOKEN: ${{ secrets.STRAVA_REFRESH_TOKEN }}\n" +
     "        run: hevy2garmin sync\n"
   );
 }

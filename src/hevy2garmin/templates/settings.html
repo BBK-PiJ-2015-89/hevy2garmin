@@ -215,6 +215,41 @@
         </p>
     </div>
 
+    <!-- Strava Visual Strength Section -->
+    <div class="card section">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fc4c02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3 4 21h6l3-7 3 7h6L13 3z"/></svg>
+                <span class="card-title">Strava Visual Strength</span>
+            </div>
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="hidden" name="strava_visual_strength_upload" value="off">
+                <input type="checkbox" name="strava_visual_strength_upload" value="on" {{ 'checked' if config.get('strava', {}).get('visual_strength_upload') }} style="width: 18px; height: 18px; accent-color: var(--accent);">
+                <span style="font-size: 13px; color: var(--text-secondary);">Enabled</span>
+            </label>
+        </div>
+        <p class="section-description">
+            Uploads a second structured Strength Training activity to Strava so Strava can show the exercise list and set breakdown. Your Garmin watch upload is left alone.
+        </p>
+        <div class="form-grid">
+            <div class="form-group">
+                <label class="form-label" for="strava_client_id">Strava Client ID</label>
+                <input class="form-input" type="password" id="strava_client_id" name="strava_client_id" placeholder="{% if strava_connected %}Saved. Leave blank to keep current{% else %}From your Strava API app{% endif %}">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="strava_client_secret">Strava Client Secret</label>
+                <input class="form-input" type="password" id="strava_client_secret" name="strava_client_secret" placeholder="{% if strava_connected %}Saved. Leave blank to keep current{% else %}From your Strava API app{% endif %}">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="strava_refresh_token">Strava Refresh Token</label>
+                <input class="form-input" type="password" id="strava_refresh_token" name="strava_refresh_token" placeholder="{% if strava_connected %}Saved. Leave blank to keep current{% else %}Authorize with activity:write{% endif %}">
+            </div>
+        </div>
+        <div class="form-hint">
+            The Strava app needs <code>activity:write</code>. Use <code>activity:read_all</code> too if you later want to match or edit private activities.
+        </div>
+    </div>
+
     <!-- Advanced Section (FIT Timing) -->
     <div class="card section">
         <details class="advanced-section">

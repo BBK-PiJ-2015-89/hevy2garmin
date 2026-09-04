@@ -53,6 +53,10 @@ function sanitise(key: string, raw: Obj): Obj {
     }
   } else if (key === "hr_fusion") {
     if ("enabled" in raw) out.enabled = Boolean(raw.enabled);
+  } else if (key === "strava_settings") {
+    if ("visual_strength_upload" in raw) {
+      out.visual_strength_upload = Boolean(raw.visual_strength_upload);
+    }
   } else if (key === "merge_settings") {
     if ("merge_watch_strategy" in raw) {
       const s = String(raw.merge_watch_strategy);
@@ -109,7 +113,40 @@ function sanitise(key: string, raw: Obj): Obj {
   return out;
 }
 
-const EDITABLE = ["auto_sync", "hr_fusion", "merge_settings", "user_profile", "timing"];
+const EDITABLE = ["auto_sync", "hr_fusion", "strava_settings", "merge_settings", "user_profile", "timing"];
+
+async function saveStravaCredentials(sql: ReturnType<typeof getDb>, raw: Obj): Promise<boolean> {
+  const updates: Record<string, string> = {};
+  for (const [bodyKey, credKey] of [
+    ["strava_client_id", "client_id"],
+    ["strava_client_secret", "client_secret"],
+    ["strava_refresh_token", "refresh_token"],
+  ] as const) {
+    const value = typeof raw[bodyKey] === "string" ? raw[bodyKey].trim() : "";
+    if (value) updates[credKey] = value;
+  }
+  if (Object.keys(updates).length === 0) return false;
+
+  const rows = (await sql`
+    SELECT credentials
+    FROM platform_credentials
+    WHERE platform = 'strava'
+    LIMIT 1
+  `) as { credentials: unknown }[];
+  const current = isObj(rows[0]?.credentials) ? rows[0].credentials : {};
+  const merged = { ...current, ...updates };
+  const active = ["client_id", "client_secret", "refresh_token"].every((k) => {
+    const value = merged[k];
+    return typeof value === "string" && value.trim().length > 0;
+  });
+  await sql`
+    INSERT INTO platform_credentials (platform, auth_type, credentials, status, connected_at)
+    VALUES ('strava', 'oauth', ${sql.json(merged)}, ${active ? "active" : "disconnected"}, NOW())
+    ON CONFLICT (platform) DO UPDATE
+       SET credentials = EXCLUDED.credentials,
+           status = EXCLUDED.status`;
+  return true;
+}
 
 export async function POST(request: Request) {
   // Gate only when a password is configured (prod). With no password set the app
@@ -138,8 +175,11 @@ export async function POST(request: Request) {
   // GitHub token (#458): not app_cache config — the platform_credentials row the Python
   // dashboard writes from its Settings page. Blank = keep the current one.
   const githubPat = typeof body.github_pat === "string" ? body.github_pat.trim() : "";
+  const hasStravaCreds = ["strava_client_id", "strava_client_secret", "strava_refresh_token"].some(
+    (k) => typeof body[k] === "string" && body[k].trim().length > 0,
+  );
   const keys = Object.keys(changes);
-  if (keys.length === 0 && !githubPat) {
+  if (keys.length === 0 && !githubPat && !hasStravaCreds) {
     return NextResponse.json({ error: "No editable config provided." }, { status: 400 });
   }
 
@@ -152,8 +192,16 @@ export async function POST(request: Request) {
 
   try {
     if (githubPat) await saveGithubPat(sql, githubPat);
+    const savedStravaCreds = await saveStravaCredentials(sql, body);
     for (const key of keys) await saveConfigKey(sql, key, changes[key]);
-    return NextResponse.json({ ok: true, saved: githubPat ? [...keys, "github_pat"] : keys });
+    return NextResponse.json({
+      ok: true,
+      saved: [
+        ...keys,
+        ...(githubPat ? ["github_pat"] : []),
+        ...(savedStravaCreds ? ["strava_credentials"] : []),
+      ],
+    });
   } catch (err) {
     console.error("settings write failed:", err);
     return NextResponse.json({ error: "Failed to save settings." }, { status: 500 });
