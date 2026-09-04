@@ -21,18 +21,19 @@ let cachedKey: { material: string; key: CryptoKey } | null = null;
 
 async function getKey(): Promise<CryptoKey> {
   const secret = process.env.HEVY2GARMIN_SECRET;
-  const password = process.env.H2G_PASSWORD;
+  // Same seed order as lib/auth.ts and Python auth.py `_secret()` (#460).
+  const seed = process.env.H2G_SECRET || process.env.H2G_PASSWORD || process.env.H2G_PASSWORD_HASH;
   let material: string;
   let rawKey: Uint8Array;
   if (secret) {
     material = `secret:${secret}`;
     rawKey = new TextEncoder().encode(secret);
   } else {
-    if (!password) throw new Error("no auth secret");
-    material = `password:${password}`;
+    if (!seed) throw new Error("no auth secret");
+    material = `seed:${seed}`;
     const digest = await crypto.subtle.digest(
       "SHA-256",
-      new TextEncoder().encode(`h2g-session-${password}`),
+      new TextEncoder().encode(`h2g-session-${seed}`),
     );
     rawKey = new Uint8Array(digest);
   }
@@ -89,7 +90,7 @@ async function verifySession(cookie: string | null, epoch: number): Promise<bool
 }
 
 function authEnabled(): boolean {
-  return Boolean(process.env.HEVY2GARMIN_SECRET || process.env.H2G_PASSWORD);
+  return Boolean(process.env.HEVY2GARMIN_SECRET || process.env.H2G_SECRET || process.env.H2G_PASSWORD || process.env.H2G_PASSWORD_HASH);
 }
 
 /* The "sign out everywhere" epoch, read from the public /api/session-epoch and

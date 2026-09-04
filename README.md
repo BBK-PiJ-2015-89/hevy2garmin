@@ -112,6 +112,18 @@ To keep future workouts syncing automatically, toggle **Auto-sync** on the dashb
 
 **That's it.** Check [Garmin Connect](https://connect.garmin.com/modern/activities) to see your workouts with proper exercise names, sets, reps, and weights.
 
+### Web dashboard rebuild (Next.js, preview)
+
+A Next.js rebuild of the dashboard lives in `web/`. It uses the same database and the same `platform_credentials` rows as the Python dashboard, so both can run against one Neon project. Vercel still serves the Python dashboard from `api/index.py` until the cutover is announced here and in the changelog. To try the rebuild now:
+
+```bash
+cd web
+cp .env.example .env.local   # fill in DATABASE_URL, H2G_PASSWORD (or H2G_PASSWORD_HASH), HEVY2GARMIN_SECRET (or H2G_SECRET), CRON_SECRET
+npm ci && npm run dev        # http://localhost:8096
+```
+
+CI runs a fresh-fork check for both paths on every change: the Python package must install and boot from its base dependencies, and the web app must install from its lockfile, build, and answer with a bare environment. A red check blocks the merge, so `main` stays deployable for a fresh fork.
+
 ### Web Dashboard (local install)
 
 ```bash

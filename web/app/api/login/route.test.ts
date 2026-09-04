@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("@/lib/auth", () => ({
   authEnabled: () => true,
   checkPassword: (p: string) => p === "correct-horse",
+  verifyPassword: async (p: string) => p === "correct-horse",
   signSession: async () => "v1.123.deadbeefdeadbeefdeadbeefdeadbeef",
   SESSION_COOKIE: "h2g_session",
 }));

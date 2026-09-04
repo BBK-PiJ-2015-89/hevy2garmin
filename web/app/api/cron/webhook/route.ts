@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { syncOneWorkout } from "@/lib/sync-one";
 import { getDb } from "@/lib/db";
+import { getGithubPat, getGithubRepo, triggerViaActions } from "@/lib/github";
 
 // Runs a sync at request time — never at build.
 export const dynamic = "force-dynamic";
@@ -16,18 +17,6 @@ export const runtime = "nodejs";
  * Action when GITHUB_PAT + GITHUB_REPO are set, else running the tested
  * single-workout engine inline.
  */
-async function triggerViaActions(pat: string, repo: string): Promise<boolean> {
-  const res = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${pat}`,
-      Accept: "application/vnd.github+json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ event_type: "sync-trigger" }),
-  });
-  return res.ok;
-}
 
 export async function POST(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -43,8 +32,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  const pat = process.env.GITHUB_PAT;
-  const repo = process.env.GITHUB_REPO;
+  // Settings row first, GITHUB_PAT fallback (#458). The DB handle may be unavailable here; env still works.
+  let sqlForPat: ReturnType<typeof getDb> | null = null;
+  try { sqlForPat = getDb(); } catch { sqlForPat = null; }
+  const pat = await getGithubPat(sqlForPat);
+  const repo = getGithubRepo();
   if (pat && repo) {
     try {
       const ok = await triggerViaActions(pat, repo);

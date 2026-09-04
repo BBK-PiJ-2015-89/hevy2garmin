@@ -199,6 +199,7 @@ export default async function SettingsPage() {
       <section className="mb-8">
         <h2 className="mb-3 text-lg font-semibold text-text">Configuration</h2>
         <SettingsForm
+          githubTokenSet={data.platforms.some((r) => r.platform === "github" && r.status === "active")}
           autoSyncEnabled={Boolean(autoSync.enabled)}
           autoSyncInterval={Number(autoSync.interval_minutes) || 120}
           hrFusionEnabled={hrFusion.enabled == null ? true : Boolean(hrFusion.enabled)}

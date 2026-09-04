@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { syncOneWorkout, type SyncOneResult } from "@/lib/sync-one";
 import { getDb } from "@/lib/db";
+import { getGithubPat, getGithubRepo, triggerViaActions } from "@/lib/github";
 import { verifySession, SESSION_COOKIE, authEnabled } from "@/lib/auth";
 
 // Reads live Hevy + Postgres (and, on the live path, Garmin) at request time.
@@ -47,18 +48,6 @@ function wantsLive(request: Request, body: Record<string, unknown>): boolean {
   return b === 1 || b === true || b === "1" || b === "true";
 }
 
-async function triggerViaActions(pat: string, repo: string): Promise<boolean> {
-  const res = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${pat}`,
-      Accept: "application/vnd.github+json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ event_type: "sync-trigger" }),
-  });
-  return res.ok;
-}
 
 export async function POST(request: Request) {
   let body: Record<string, unknown> = {};
@@ -106,8 +95,8 @@ export async function POST(request: Request) {
 
   // Live, deployed: hand off to the GitHub Action so the long browser-auth sync
   // runs off the request path.
-  const pat = process.env.GITHUB_PAT;
-  const repo = process.env.GITHUB_REPO;
+  const pat = await getGithubPat(sql);   // Settings row first, GITHUB_PAT fallback (#458)
+  const repo = getGithubRepo();
   if (pat && repo) {
     try {
       const ok = await triggerViaActions(pat, repo);

@@ -7,6 +7,10 @@ const nextConfig: NextConfig = {
   output: process.env.VERCEL ? undefined : "standalone",
   // Don't auto-generate AGENTS.md / CLAUDE.md on build (those are local-only).
   agentRules: false,
+  // Parity with the Python dashboard's GET /sync → dashboard (#461).
+  async redirects() {
+    return [{ source: "/sync", destination: "/dashboard", permanent: false }];
+  },
 };
 
 export default nextConfig;

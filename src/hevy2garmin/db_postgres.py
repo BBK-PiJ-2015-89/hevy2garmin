@@ -107,6 +107,23 @@ class PostgresDatabase(Database):
                         status VARCHAR(20) DEFAULT 'disconnected'
                     )
                 """)
+                # #459: self-heal a Garmin token row written by garmin-auth < 0.3 (flat DI payload).
+                # 0.3+ on both stacks nests it under 'garmin_tokens', the only shape the stores read;
+                # without this a fork whose row predates the change is told to reconnect Garmin.
+                # Legacy oauth1/oauth2 rows are dead anyway (rejected on load) — drop them.
+                cur.execute("""
+                    UPDATE platform_credentials
+                       SET credentials = jsonb_build_object('garmin_tokens', credentials),
+                           auth_type = 'oauth', status = 'active'
+                     WHERE platform = 'garmin_tokens'
+                       AND credentials ? 'di_token'
+                       AND NOT (credentials ? 'garmin_tokens')
+                """)
+                cur.execute("""
+                    DELETE FROM platform_credentials
+                     WHERE platform = 'garmin_tokens'
+                       AND (credentials ? 'oauth1_token.json' OR credentials ? 'oauth2_token.json')
+                """)
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS custom_mappings (
                         hevy_name TEXT PRIMARY KEY,

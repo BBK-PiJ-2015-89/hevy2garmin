@@ -12,6 +12,7 @@ vi.mock("@/lib/db", () => {
   const tag = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const q = strings.join("?");
     if (q.startsWith("SELECT key, value FROM app_cache")) return []; // no existing config
+    if (q.startsWith("SELECT value FROM app_cache")) return [];      // saveConfigKey: no existing row
     if (q.includes("INSERT INTO app_cache")) {
       writes.push({ key: values[0] as string, value: values[1] as Record<string, unknown> });
       return [];

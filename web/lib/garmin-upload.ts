@@ -15,6 +15,7 @@
  * (dryRun === false). `findExistingActivity` is a READ (the 409-prevention
  * lookup) and is always safe to call.
  */
+import { getDb } from "./db";
 import { GarminAuth, DBTokenStore, type GarminClient } from "garmin-auth";
 import {
   uploadFit,
@@ -28,6 +29,26 @@ import {
 export const GARMIN_TOKEN_PLATFORM = "garmin_tokens";
 
 let cachedClient: GarminClient | null = null;
+let normalized = false;
+
+/**
+ * Self-heal the token row (#459). garmin-auth < 0.3 (Python 0.2.x) wrote the DI payload FLAT
+ * ({di_token, …}); 0.3+ on both stacks writes it NESTED under `garmin_tokens`, which is the only
+ * shape DBTokenStore reads. A fork whose row was written by an older deploy would be told to
+ * "reconnect Garmin" for no reason. Idempotent; runs once per process; never throws.
+ */
+export async function normalizeGarminTokenRow(sql: ReturnType<typeof getDb>): Promise<void> {
+  if (normalized) return;
+  try {
+    await sql`
+      UPDATE platform_credentials
+         SET credentials = jsonb_build_object('garmin_tokens', credentials), auth_type = 'oauth', status = 'active'
+       WHERE platform = ${GARMIN_TOKEN_PLATFORM}
+         AND credentials ? 'di_token'
+         AND NOT (credentials ? 'garmin_tokens')`;
+    normalized = true;
+  } catch { /* best effort: DBTokenStore reports the real problem if any */ }
+}
 
 /**
  * Build (and cache) an authenticated GarminClient from the DI tokens stored in
@@ -42,6 +63,7 @@ export async function getGarminClient(databaseUrl?: string): Promise<GarminClien
   if (cachedClient) return cachedClient;
   const url = databaseUrl ?? process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL not set (cannot load Garmin tokens)");
+  try { await normalizeGarminTokenRow(getDb()); } catch { /* no DB handle: DBTokenStore reports it */ }
   const store = new DBTokenStore(url, GARMIN_TOKEN_PLATFORM);
   const auth = new GarminAuth({ store });
   cachedClient = await auth.client();

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getDb } from "@/lib/db";
+import { saveGithubPat } from "@/lib/github";
+import { saveConfigKey } from "@/lib/config";
 import { verifySession, SESSION_COOKIE, authEnabled } from "@/lib/auth";
 
 // Writes config to the live hevy2garmin Postgres (app_cache) at request time.
@@ -133,8 +135,11 @@ export async function POST(request: Request) {
       if (Object.keys(s).length > 0) changes[key] = s;
     }
   }
+  // GitHub token (#458): not app_cache config — the platform_credentials row the Python
+  // dashboard writes from its Settings page. Blank = keep the current one.
+  const githubPat = typeof body.github_pat === "string" ? body.github_pat.trim() : "";
   const keys = Object.keys(changes);
-  if (keys.length === 0) {
+  if (keys.length === 0 && !githubPat) {
     return NextResponse.json({ error: "No editable config provided." }, { status: 400 });
   }
 
@@ -146,21 +151,9 @@ export async function POST(request: Request) {
   }
 
   try {
-    const existing = (await sql`SELECT key, value FROM app_cache WHERE key = ANY(${keys})`) as {
-      key: string;
-      value: unknown;
-    }[];
-    const existingMap = new Map(existing.map((r) => [r.key, isObj(r.value) ? r.value : {}]));
-
-    for (const key of keys) {
-      const merged = { ...(existingMap.get(key) ?? {}), ...changes[key] };
-      await sql`
-        INSERT INTO app_cache (key, value)
-        VALUES (${key}, ${sql.json(merged)})
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-      `;
-    }
-    return NextResponse.json({ ok: true, saved: keys });
+    if (githubPat) await saveGithubPat(sql, githubPat);
+    for (const key of keys) await saveConfigKey(sql, key, changes[key]);
+    return NextResponse.json({ ok: true, saved: githubPat ? [...keys, "github_pat"] : keys });
   } catch (err) {
     console.error("settings write failed:", err);
     return NextResponse.json({ error: "Failed to save settings." }, { status: 500 });

@@ -36,7 +36,10 @@ let cachedKey: { material: string; key: CryptoKey } | null = null;
  */
 async function getKey(): Promise<CryptoKey> {
   const secret = process.env.HEVY2GARMIN_SECRET;
-  const password = process.env.H2G_PASSWORD;
+  // Python's auth.py `_secret()`: H2G_SECRET, else the password, else the password hash —
+  // all run through SHA-256("h2g-session-" + seed). HEVY2GARMIN_SECRET keeps its raw-bytes
+  // behaviour for existing deployments. (#460 parity)
+  const seed = process.env.H2G_SECRET || process.env.H2G_PASSWORD || process.env.H2G_PASSWORD_HASH;
 
   let material: string;
   let rawKey: Uint8Array;
@@ -45,12 +48,12 @@ async function getKey(): Promise<CryptoKey> {
     material = `secret:${secret}`;
     rawKey = new TextEncoder().encode(secret);
   } else {
-    if (!password) throw new Error("H2G_PASSWORD not set (and no HEVY2GARMIN_SECRET)");
-    material = `password:${password}`;
-    // SHA-256("h2g-session-" + password) — matches auth.py `_secret()`.
+    if (!seed) throw new Error("no signing seed: set H2G_PASSWORD, H2G_PASSWORD_HASH, H2G_SECRET or HEVY2GARMIN_SECRET");
+    material = `seed:${seed}`;
+    // SHA-256("h2g-session-" + seed) — matches auth.py `_secret()`.
     const digest = await crypto.subtle.digest(
       "SHA-256",
-      new TextEncoder().encode(`h2g-session-${password}`),
+      new TextEncoder().encode(`h2g-session-${seed}`),
     );
     rawKey = new Uint8Array(digest);
   }
@@ -77,7 +80,7 @@ async function hmacHex32(data: string): Promise<string> {
 
 /** True when auth is configured (either a secret or a password is present). */
 export function authEnabled(): boolean {
-  return Boolean(process.env.HEVY2GARMIN_SECRET || process.env.H2G_PASSWORD);
+  return Boolean(process.env.HEVY2GARMIN_SECRET || process.env.H2G_SECRET || process.env.H2G_PASSWORD || process.env.H2G_PASSWORD_HASH);
 }
 
 /**
@@ -145,4 +148,22 @@ export function checkPassword(candidate: string): boolean {
   let diff = 0;
   for (let i = 0; i < pw.length; i++) diff |= candidate.charCodeAt(i) ^ pw.charCodeAt(i);
   return diff === 0;
+}
+
+/**
+ * Verify a login candidate the way auth.py `check_password` does: against the argon2
+ * H2G_PASSWORD_HASH when set (`hevy2garmin hash-password` output, an encoded
+ * `$argon2id$…` string), else the plaintext H2G_PASSWORD. (#460 parity)
+ */
+export async function verifyPassword(candidate: string): Promise<boolean> {
+  const hash = process.env.H2G_PASSWORD_HASH?.trim();
+  if (hash) {
+    try {
+      const { argon2Verify } = await import("hash-wasm");
+      return await argon2Verify({ password: candidate, hash });
+    } catch {
+      return false;
+    }
+  }
+  return checkPassword(candidate);
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { getGithubPat, getGithubRepo, setupGithubActions, disableGithubActions } from "@/lib/github";
 
 // Reads/writes the app_cache config at request time — never at build.
 export const dynamic = "force-dynamic";
@@ -41,12 +42,30 @@ export async function POST(request: Request) {
     const enabled =
       typeof body.enabled === "boolean" ? body.enabled : !Boolean(current.enabled);
     const next = { ...current, enabled };
+    // On Vercel auto-sync runs through GitHub Actions on the fork (#458, parity with the
+    // Python route): enabling needs a token and writes the workflow; disabling deletes it.
+    const onVercel = Boolean(process.env.VERCEL);
+    let actions: { ok: boolean; message: string } | null = null;
+    if (onVercel) {
+      const pat = await getGithubPat(sql);
+      const repo = getGithubRepo();
+      if (enabled) {
+        if (!pat) return NextResponse.json({ ok: false, error: "Auto-sync needs a GitHub token. Add one in Settings, then turn auto-sync on." }, { status: 400 });
+        if (repo && process.env.DATABASE_URL) {
+          const interval = Number(current.interval_minutes) || 120;
+          actions = await setupGithubActions({ pat, repo, databaseUrl: process.env.DATABASE_URL, intervalMinutes: interval });
+          if (!actions.ok) return NextResponse.json({ ok: false, error: actions.message }, { status: 502 });
+        }
+      } else if (pat && repo) {
+        await disableGithubActions({ pat, repo });
+      }
+    }
     await sql`
       INSERT INTO app_cache (key, value, updated_at)
       VALUES ('auto_sync', ${sql.json(next)}, NOW())
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
     `;
-    return NextResponse.json({ ok: true, enabled });
+    return NextResponse.json({ ok: true, enabled, ...(actions ? { message: actions.message } : {}) });
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ ok: false, error }, { status: 500 });

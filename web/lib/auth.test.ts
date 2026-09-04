@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterEach } from "vitest";
 import { createHmac } from "node:crypto";
-import { signSession, verifySession, checkPassword } from "./auth";
+import { signSession, verifySession, checkPassword, authEnabled, verifyPassword } from "./auth";
 
 /** Build a valid legacy v1 cookie the way the pre-epoch app signed them. */
 function makeV1Cookie(secret: string, ts: number): string {
@@ -88,5 +88,31 @@ describe("checkPassword", () => {
     expect(checkPassword("hunter2xy")).toBe(false);
     expect(checkPassword("short")).toBe(false);
     delete process.env.H2G_PASSWORD;
+  });
+});
+
+describe("auth env parity with the Python dashboard (#460)", () => {
+  const saved = { ...process.env };
+  const reset = () => { for (const k of ["HEVY2GARMIN_SECRET", "H2G_SECRET", "H2G_PASSWORD", "H2G_PASSWORD_HASH"]) delete process.env[k]; };
+  afterEach(() => { reset(); Object.assign(process.env, saved); });
+
+  it("H2G_SECRET alone enables auth and signs/verifies a session", async () => {
+    reset(); process.env.H2G_SECRET = "seed-from-python-side";
+    expect(authEnabled()).toBe(true);
+    const c = await signSession(0); expect(await verifySession(c, 0)).toBe(true);
+  });
+  it("H2G_PASSWORD_HASH alone enables auth and verifies an argon2 candidate", async () => {
+    reset();
+    const { argon2id } = await import("hash-wasm");
+    const hash = await argon2id({ password: "hunter2", salt: new Uint8Array(16).fill(7), parallelism: 1, iterations: 2, memorySize: 8192, hashLength: 32, outputType: "encoded" });
+    process.env.H2G_PASSWORD_HASH = hash;
+    expect(authEnabled()).toBe(true);
+    expect(await verifyPassword("hunter2")).toBe(true);
+    expect(await verifyPassword("hunter3")).toBe(false);
+    const c = await signSession(0); expect(await verifySession(c, 0)).toBe(true);
+  });
+  it("falls back to the plaintext password when no hash is set", async () => {
+    reset(); process.env.H2G_PASSWORD = "plain";
+    expect(await verifyPassword("plain")).toBe(true); expect(await verifyPassword("wrong")).toBe(false);
   });
 });

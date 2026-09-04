@@ -57,6 +57,7 @@ function LoginForm() {
       <form onSubmit={onSubmit} className="flex flex-col gap-3">
         <input
           type="password"
+          data-testid="login-password"
           autoFocus
           value={password}
           onChange={(e) => setPassword(e.target.value)}
@@ -70,6 +71,7 @@ function LoginForm() {
         )}
         <button
           type="submit"
+          data-testid="login-submit"
           disabled={loading || password.length === 0}
           className="rounded-lg bg-teal px-4 py-3 font-medium text-black transition-opacity disabled:opacity-50"
         >

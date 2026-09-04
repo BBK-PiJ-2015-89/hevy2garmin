@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { checkPassword, signSession, SESSION_COOKIE, authEnabled } from "@/lib/auth";
+import { verifyPassword, signSession, SESSION_COOKIE, authEnabled } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { getSessionEpoch } from "@/lib/session-epoch";
 import { lockoutRemaining, recordFailure, clearFailures, formatCooldown } from "@/lib/login-ratelimit";
@@ -52,7 +52,7 @@ export async function POST(req: Request) {
     }
   }
 
-  if (!body.password || !checkPassword(body.password)) {
+  if (!body.password || !(await verifyPassword(body.password))) {
     if (sql) {
       await recordFailure(sql, key);
       const remaining = await lockoutRemaining(sql, key);
