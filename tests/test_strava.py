@@ -98,6 +98,7 @@ def test_generate_description_lists_workout_details(sample_workout: dict) -> Non
     assert "Bench Press (Barbell)" in desc
     assert "Warm-up: 40 kg x 12" in desc
     assert "Set 1: 60 kg x 10" in desc
+    assert "Bespoke sync by Graeme's Hevy2Garmin build" in desc
     assert "delete" not in desc.lower()
 
 

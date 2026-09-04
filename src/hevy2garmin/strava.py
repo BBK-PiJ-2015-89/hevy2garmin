@@ -29,6 +29,10 @@ _BASE_URL = "https://www.strava.com"
 _API_BASE_URL = "https://www.strava.com/api/v3"
 _STATE_PREFIX = "strava_visual_upload_"
 _TRUTHY = {"1", "true", "yes", "on"}
+_DESCRIPTION_FOOTER = (
+    "Bespoke sync by Graeme's Hevy2Garmin build: Hevy workout detail mixed "
+    "with Garmin HR, polished for Strava."
+)
 
 
 @dataclass
@@ -434,7 +438,7 @@ def generate_strava_description(
             lines.extend(set_lines)
 
     lines.append("")
-    lines.append("Synced from Hevy via hevy2garmin.")
+    lines.append(_DESCRIPTION_FOOTER)
     return "\n".join(lines).strip()
 
 
