@@ -13,6 +13,7 @@ demo-mode refusal) were previously unverified.
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -603,6 +604,66 @@ class TestWorkoutHR:
         assert r.status_code == 200
         assert r.json() == cached
         assert called == []
+
+
+class TestStravaVisualWorkout:
+    """POST /api/workout/{id}/strava-visual — manual visual Strava send/refresh."""
+
+    def test_requires_strava_visual_setting(self, client) -> None:
+        with patch.object(srv, "load_config", lambda: {"strava": {"visual_strength_upload": False}}), \
+             patch("hevy2garmin.strava.visual_strength_upload_enabled", lambda cfg: False):
+            r = client.post("/api/workout/w1/strava-visual")
+        assert r.status_code == 409
+        assert "Strava Visual Strength" in r.json()["error"]
+
+    def test_refreshes_from_single_hevy_workout(
+        self,
+        client,
+        sample_workout: dict,
+    ) -> None:
+        captured: dict = {}
+
+        class FakeHevy:
+            def __init__(self, api_key=None):
+                self.api_key = api_key
+
+            def get_workout(self, workout_id):
+                captured["workout_id"] = workout_id
+                return sample_workout
+
+        def fake_upload(workout, **kwargs):
+            captured["upload"] = {"workout": workout, **kwargs}
+            return SimpleNamespace(
+                status="replaced",
+                activity_id=456,
+                upload_id="u123",
+                error=None,
+            )
+
+        fake_store = object()
+        with patch.object(srv, "load_config", lambda: {"hevy_api_key": "hk", "strava": {"visual_strength_upload": True}}), \
+             patch.object(srv.db, "get_db", lambda: fake_store), \
+             patch("hevy2garmin.strava.visual_strength_upload_enabled", lambda cfg: True), \
+             patch("hevy2garmin.hevy.HevyClient", FakeHevy), \
+             patch.object(srv, "_best_effort_hr_samples", lambda store, workout, cfg: [{"time": 0, "hr": 99}]), \
+             patch.object(srv, "_best_effort_fit_stats", lambda workout, hr: {"calories": 123, "avg_hr": 99}), \
+             patch("hevy2garmin.strava.try_upload_visual_strength", fake_upload):
+            r = client.post(
+                "/api/workout/test-workout-123/strava-visual",
+                data={"replace": "true", "force_new": "true"},
+            )
+
+        assert r.status_code == 200
+        assert r.json()["status"] == "replaced"
+        assert captured["workout_id"] == "test-workout-123"
+        upload = captured["upload"]
+        assert upload["workout"] is sample_workout
+        assert upload["store"] is fake_store
+        assert upload["hr_samples"] == [{"time": 0, "hr": 99}]
+        assert upload["calories"] == 123
+        assert upload["avg_hr"] == 99
+        assert upload["replace_existing"] is True
+        assert upload["force_new_external_id"] is True
 
 
 class TestMappingsPage:

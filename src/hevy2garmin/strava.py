@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -329,6 +330,114 @@ def _build_streams(hr_samples: list[Any] | None, duration_s: float) -> dict[str,
     return {"time": times, "heartrate": [points[t] for t in times]}
 
 
+def _fmt_number(value: Any, digits: int = 1) -> str:
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if num.is_integer():
+        return str(int(num))
+    return f"{num:.{digits}f}".rstrip("0").rstrip(".")
+
+
+def _fmt_duration(seconds: Any) -> str:
+    try:
+        total = int(round(float(seconds)))
+    except (TypeError, ValueError):
+        return ""
+    if total <= 0:
+        return ""
+    minutes, secs = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes}m"
+    if minutes and secs:
+        return f"{minutes}m {secs}s"
+    if minutes:
+        return f"{minutes}m"
+    return f"{secs}s"
+
+
+def _set_description(index: int, set_data: dict[str, Any]) -> str | None:
+    set_type = str(set_data.get("type") or "normal").strip().lower()
+    if set_type == "rest":
+        return None
+    label = "Warm-up" if set_type == "warmup" else f"Set {index}"
+    parts: list[str] = []
+
+    weight = set_data.get("weight_kg")
+    if weight is None:
+        weight = set_data.get("weight")
+    reps = set_data.get("reps")
+    distance = set_data.get("distance_meters")
+    duration = set_data.get("duration_seconds")
+    rpe = set_data.get("rpe")
+
+    if weight is not None and reps is not None:
+        parts.append(f"{_fmt_number(weight)} kg x {int(reps)}")
+    elif reps is not None:
+        parts.append(f"{int(reps)} reps")
+    elif weight is not None:
+        parts.append(f"{_fmt_number(weight)} kg")
+
+    if distance:
+        parts.append(f"{_fmt_number(float(distance) / 1000)} km")
+    if duration:
+        formatted = _fmt_duration(duration)
+        if formatted:
+            parts.append(formatted)
+    if rpe is not None:
+        parts.append(f"RPE {_fmt_number(rpe)}")
+
+    if not parts:
+        return f"{label}: logged"
+    return f"{label}: {' | '.join(parts)}"
+
+
+def generate_strava_description(
+    workout: dict[str, Any],
+    *,
+    calories: int | None = None,
+    avg_hr: int | None = None,
+) -> str:
+    """Generate a detailed Strava description from the Hevy workout."""
+    title = str(workout.get("title") or "Strength Training")
+    start = _parse_timestamp(workout.get("start_time") or workout.get("startTime"))
+    end = _parse_timestamp(workout.get("end_time") or workout.get("endTime"))
+    duration_s = int((end - start).total_seconds()) if start and end else 0
+
+    lines: list[str] = [title]
+    summary: list[str] = []
+    if duration_s > 0:
+        summary.append(_fmt_duration(duration_s))
+    if calories:
+        summary.append(f"{calories} kcal")
+    if avg_hr:
+        summary.append(f"avg HR {avg_hr} bpm")
+    if summary:
+        lines.append(" | ".join(summary))
+
+    for exercise in workout.get("exercises") or []:
+        name = exercise.get("title") or exercise.get("name") or "Exercise"
+        set_lines: list[str] = []
+        normal_index = 1
+        for set_data in exercise.get("sets") or []:
+            line = _set_description(normal_index, set_data)
+            if line is None:
+                continue
+            set_lines.append(line)
+            if str(set_data.get("type") or "normal").lower() != "warmup":
+                normal_index += 1
+        if set_lines:
+            lines.append("")
+            lines.append(str(name))
+            lines.extend(set_lines)
+
+    lines.append("")
+    lines.append("Synced from Hevy via hevy2garmin.")
+    return "\n".join(lines).strip()
+
+
 def build_strength_payload(
     workout: dict[str, Any],
     *,
@@ -373,29 +482,37 @@ def _state_key(hevy_id: str) -> str:
     return f"{_STATE_PREFIX}{safe}"
 
 
-def _already_uploaded(store: Any, hevy_id: str) -> bool:
+def get_visual_upload_state(store: Any, hevy_id: str) -> dict[str, Any] | None:
+    """Return stored Strava visual upload state for a Hevy workout."""
     if store is None or not hasattr(store, "get_app_config"):
-        return False
+        return None
     try:
         state = store.get_app_config(_state_key(hevy_id))
     except Exception:
-        return False
-    return isinstance(state, dict) and bool(state.get("activity_id"))
+        return None
+    return state if isinstance(state, dict) else None
 
 
-def _mark_uploaded(store: Any, hevy_id: str, result: StravaUploadResult, external_id: str) -> None:
+def _mark_uploaded(
+    store: Any,
+    hevy_id: str,
+    result: StravaUploadResult,
+    external_id: str,
+    *,
+    replaced_activity_id: int | None = None,
+) -> None:
     if store is None or not hasattr(store, "set_app_config") or not result.activity_id:
         return
     try:
-        store.set_app_config(
-            _state_key(hevy_id),
-            {
-                "activity_id": result.activity_id,
-                "upload_id": result.upload_id,
-                "external_id": external_id,
-                "uploaded_at": datetime.now(timezone.utc).isoformat(),
-            },
-        )
+        state = {
+            "activity_id": result.activity_id,
+            "upload_id": result.upload_id,
+            "external_id": external_id,
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if replaced_activity_id is not None:
+            state["replaced_activity_id"] = replaced_activity_id
+        store.set_app_config(_state_key(hevy_id), state)
     except Exception:
         logger.debug("Could not store Strava visual upload state", exc_info=True)
 
@@ -404,8 +521,10 @@ def _api_base() -> str:
     return (os.environ.get("STRAVA_API_BASE_URL") or _API_BASE_URL).rstrip("/")
 
 
-def _external_id(workout: dict[str, Any]) -> str:
+def _external_id(workout: dict[str, Any], *, unique: bool = False) -> str:
     wid = re.sub(r"[^A-Za-z0-9_.:-]+", "_", str(workout.get("id") or "workout"))
+    if unique:
+        return f"hevy2garmin-{wid}-{uuid.uuid4().hex[:12]}.json"
     return f"hevy2garmin-{wid}.json"
 
 
@@ -443,6 +562,37 @@ def _upload_json(
     )
     resp.raise_for_status()
     return resp.json()
+
+
+def _update_activity_metadata(
+    token: str,
+    activity_id: int | str,
+    *,
+    name: str,
+    description: str,
+    session: Any = requests,
+) -> None:
+    resp = session.put(
+        f"{_api_base()}/activities/{activity_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"name": name, "description": description},
+        timeout=30,
+    )
+    resp.raise_for_status()
+
+
+def _delete_activity(
+    token: str,
+    activity_id: int | str,
+    *,
+    session: Any = requests,
+) -> None:
+    resp = session.delete(
+        f"{_api_base()}/activities/{activity_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
+    )
+    resp.raise_for_status()
 
 
 def _poll_upload(
@@ -492,6 +642,9 @@ def try_upload_visual_strength(
     hr_samples: list[Any] | None = None,
     calories: int | None = None,
     avg_hr: int | None = None,
+    update_existing: bool = False,
+    replace_existing: bool = False,
+    force_new_external_id: bool = False,
     session: Any = requests,
 ) -> StravaUploadResult:
     """Best-effort upload of a visual Strava strength activity.
@@ -503,7 +656,13 @@ def try_upload_visual_strength(
         return StravaUploadResult(status="skipped")
 
     hevy_id = str(workout.get("id") or "")
-    if hevy_id and _already_uploaded(store, hevy_id):
+    existing_state = get_visual_upload_state(store, hevy_id) if hevy_id else None
+    if (
+        existing_state
+        and existing_state.get("activity_id")
+        and not update_existing
+        and not replace_existing
+    ):
         logger.info("Strava visual upload: already uploaded for %s", hevy_id)
         return StravaUploadResult(status="skipped")
 
@@ -515,26 +674,43 @@ def try_upload_visual_strength(
         return StravaUploadResult(status="failed", error="missing credentials")
 
     try:
+        title = str(workout.get("title") or "Strength Training")
+        description = generate_strava_description(
+            workout,
+            calories=calories,
+            avg_hr=avg_hr,
+        )
+        token = refresh_access_token(creds, session=session)
+        replaced_activity_id = None
+        if existing_state and existing_state.get("activity_id") and replace_existing:
+            replaced_activity_id = int(existing_state["activity_id"])
+        elif existing_state and existing_state.get("activity_id") and update_existing:
+            activity_id = int(existing_state["activity_id"])
+            _update_activity_metadata(
+                token,
+                activity_id,
+                name=title,
+                description=description,
+                session=session,
+            )
+            logger.info("Strava visual upload: updated activity %s", activity_id)
+            return StravaUploadResult(status="updated", activity_id=activity_id)
+
         payload = build_strength_payload(
             workout,
             config=config,
             hr_samples=hr_samples,
             calories=calories,
         )
-        token = refresh_access_token(creds, session=session)
-        title = str(workout.get("title") or "Strength Training")
-        desc_parts = ["Structured strength upload from Hevy via hevy2garmin."]
-        if avg_hr:
-            desc_parts.append(f"Average HR: {avg_hr} bpm.")
-        desc_parts.append(
-            "If Garmin also posted the watch activity, keep one private/delete it to avoid a duplicate."
+        external_id = _external_id(
+            workout,
+            unique=force_new_external_id or replace_existing,
         )
-        external_id = _external_id(workout)
         upload = _upload_json(
             token,
             payload,
             name=title,
-            description=" ".join(desc_parts),
+            description=description,
             external_id=external_id,
             session=session,
         )
@@ -543,7 +719,37 @@ def try_upload_visual_strength(
             raise RuntimeError("Strava did not return an upload id")
         result = _poll_upload(token, str(upload_id), session=session)
         if result.status == "uploaded":
-            _mark_uploaded(store, hevy_id, result, external_id)
+            delete_error = None
+            if replaced_activity_id is not None:
+                try:
+                    _delete_activity(token, replaced_activity_id, session=session)
+                    logger.info(
+                        "Strava visual upload: deleted old activity %s",
+                        replaced_activity_id,
+                    )
+                except Exception as exc:
+                    delete_error = str(exc)
+                    logger.warning(
+                        "Strava visual upload: new activity created but old "
+                        "activity %s could not be deleted: %s",
+                        replaced_activity_id,
+                        exc,
+                    )
+            _mark_uploaded(
+                store,
+                hevy_id,
+                result,
+                external_id,
+                replaced_activity_id=replaced_activity_id,
+            )
+            if replaced_activity_id is not None:
+                if delete_error is None:
+                    result.status = "replaced"
+                else:
+                    result.error = (
+                        "created new Strava copy, but could not delete old one: "
+                        f"{delete_error}"
+                    )
             logger.info(
                 "Strava visual upload: created activity %s", result.activity_id
             )

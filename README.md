@@ -504,6 +504,12 @@ Garmin can forward the watch-recorded strength activity to Strava with HR, but S
 
 When enabled, hevy2garmin leaves the Garmin sync alone and uploads a second structured **Weight Training** activity to Strava using Strava's JSON strength format. The upload includes mapped exercises, sets, reps, weights, estimated set timings, calories, and the HR stream hevy2garmin already collected for the workout when available. Runs, swims, rides, and other normal Garmin-to-Strava activities are not touched.
 
+The Strava activity description also includes a readable Hevy-style workout summary: workout duration, calories/average HR when known, plus each exercise with its sets, reps, weights, duration, distance, and RPE where available.
+
+On the **Workouts** page, use **Send to Strava** to backfill a visual Strava strength activity for an older synced workout. If the visual Strava copy already exists, the button becomes **Refresh Strava**; that replaces the hevy2garmin-created Strava visual copy with a fresh upload from the latest Hevy data. This is useful after correcting a wrong weight or rep count in Hevy.
+
+If you also need Garmin corrected after editing Hevy, click **Reload Data** first, then **Re-sync Garmin** on that workout. That deletes the old Garmin activity recorded by hevy2garmin, uploads the corrected one, and then refreshes the Strava visual copy when Strava Visual Strength is enabled.
+
 You need a Strava API app with `activity:write` access and these values saved in Settings:
 
 ```env

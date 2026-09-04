@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from hevy2garmin.strava import (
     build_strength_payload,
+    generate_strava_description,
     try_upload_visual_strength,
     visual_strength_upload_enabled,
 )
@@ -86,6 +88,19 @@ def test_build_strength_payload_contains_sets_and_hr(sample_workout: dict) -> No
     assert payload["sets"][4]["repetitions"] == 12
 
 
+def test_generate_description_lists_workout_details(sample_workout: dict) -> None:
+    desc = generate_strava_description(sample_workout, calories=200, avg_hr=90)
+
+    assert "Push" in desc
+    assert "45m" in desc
+    assert "200 kcal" in desc
+    assert "avg HR 90 bpm" in desc
+    assert "Bench Press (Barbell)" in desc
+    assert "Warm-up: 40 kg x 12" in desc
+    assert "Set 1: 60 kg x 10" in desc
+    assert "delete" not in desc.lower()
+
+
 def test_upload_refreshes_token_posts_json_and_marks_state(
     sample_workout: dict,
     monkeypatch,
@@ -120,6 +135,10 @@ def test_upload_refreshes_token_posts_json_and_marks_state(
     assert upload_call.kwargs["data"]["sport_type"] == "WeightTraining"
     assert upload_call.kwargs["data"]["data_type"] == "json"
     assert upload_call.kwargs["data"]["external_id"] == "hevy2garmin-test-workout-123.json"
+    assert "Bench Press (Barbell)" in upload_call.kwargs["data"]["description"]
+    assert "Set 1: 60 kg x 10" in upload_call.kwargs["data"]["description"]
+    assert "avg HR 90 bpm" in upload_call.kwargs["data"]["description"]
+    assert "delete" not in upload_call.kwargs["data"]["description"].lower()
     uploaded_json = json.loads(upload_call.kwargs["files"]["file"][1].decode("utf-8"))
     assert uploaded_json["sets"][0]["exercise_type"] == "BARBELL_BENCH_PRESS"
     assert uploaded_json["streams"]["heartrate"] == [90]
@@ -153,3 +172,79 @@ def test_already_uploaded_is_skipped(sample_workout: dict) -> None:
     )
     assert result.status == "skipped"
     session.post.assert_not_called()
+
+
+def test_update_existing_visual_activity_updates_description(sample_workout: dict) -> None:
+    store = _Store()
+    store.set_app_config(
+        "strava_visual_upload_test-workout-123",
+        {"activity_id": 999},
+    )
+    session = MagicMock()
+    session.post.return_value = _Resp({"access_token": "access"})
+    session.put.return_value = _Resp({})
+
+    result = try_upload_visual_strength(
+        sample_workout,
+        config=_config(),
+        store=store,
+        calories=200,
+        avg_hr=90,
+        update_existing=True,
+        session=session,
+    )
+
+    assert result.status == "updated"
+    assert result.activity_id == 999
+    session.put.assert_called_once()
+    assert session.put.call_args.args[0] == "https://www.strava.com/api/v3/activities/999"
+    assert "Bench Press (Barbell)" in session.put.call_args.kwargs["json"]["description"]
+    assert "delete" not in session.put.call_args.kwargs["json"]["description"].lower()
+    session.get.assert_not_called()
+
+
+def test_replace_existing_visual_activity_deletes_and_reuploads(
+    sample_workout: dict,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("STRAVA_BASE_URL", "https://strava.test")
+    monkeypatch.setenv("STRAVA_API_BASE_URL", "https://strava.test/api/v3")
+    monkeypatch.setattr(
+        "hevy2garmin.strava.uuid.uuid4",
+        lambda: SimpleNamespace(hex="abcdef1234567890"),
+    )
+    store = _Store()
+    store.set_app_config(
+        "strava_visual_upload_test-workout-123",
+        {"activity_id": 999, "external_id": "old.json"},
+    )
+    session = MagicMock()
+    session.post.side_effect = [
+        _Resp({"access_token": "access"}),
+        _Resp({"id": 124, "id_str": "124", "status": "success"}),
+    ]
+    session.delete.return_value = _Resp({})
+    session.get.return_value = _Resp(
+        {"id": 124, "id_str": "124", "error": None, "activity_id": 457}
+    )
+
+    result = try_upload_visual_strength(
+        sample_workout,
+        config=_config(),
+        store=store,
+        replace_existing=True,
+        session=session,
+    )
+
+    assert result.status == "replaced"
+    assert result.activity_id == 457
+    session.delete.assert_called_once()
+    assert session.delete.call_args.args[0] == "https://strava.test/api/v3/activities/999"
+    _, upload_call = session.post.call_args_list
+    assert (
+        upload_call.kwargs["data"]["external_id"]
+        == "hevy2garmin-test-workout-123-abcdef123456.json"
+    )
+    state = store.values["strava_visual_upload_test-workout-123"]
+    assert state["activity_id"] == 457
+    assert state["replaced_activity_id"] == 999

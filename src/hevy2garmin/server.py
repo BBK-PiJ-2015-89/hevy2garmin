@@ -942,10 +942,16 @@ async def workouts_page(request: Request):
     page = int(request.query_params.get("page", 1))
     page_count = 1
     fetch_error = None
+    strava_visual_enabled = False
     try:
         from hevy2garmin.hevy import HevyClient
+        from hevy2garmin.strava import (
+            get_visual_upload_state,
+            visual_strength_upload_enabled,
+        )
 
         _db = db.get_db()
+        strava_visual_enabled = visual_strength_upload_enabled(config)
         cache_key = f"hevy_workouts_page_{page}"
 
         # Try DB cache first (populated during sync). Fall back to Hevy API on miss.
@@ -974,6 +980,14 @@ async def workouts_page(request: Request):
         for w in workouts_raw:
             w["start_time"] = w.get("start_time") or w.get("startTime", "")
             w["end_time"] = w.get("end_time") or w.get("endTime", "")
+            visual_state = (
+                get_visual_upload_state(_db, w.get("id", ""))
+                if strava_visual_enabled
+                else None
+            )
+            w["strava_visual_uploaded"] = bool(
+                visual_state and visual_state.get("activity_id")
+            )
             state = states.get(w["id"])
             if state and state["kind"] == "terminal":
                 terminal_status = state.get("status") or "success"
@@ -1032,7 +1046,15 @@ async def workouts_page(request: Request):
         logger.error("Failed to fetch workouts: %s", e)
         fetch_error = str(e)
     hr_fusion = config.get("hr_fusion", {}).get("enabled", True)
-    return _render("workouts.html", workouts=workouts, hr_fusion_enabled=hr_fusion, page=page, page_count=page_count, fetch_error=fetch_error)
+    return _render(
+        "workouts.html",
+        workouts=workouts,
+        hr_fusion_enabled=hr_fusion,
+        strava_visual_enabled=strava_visual_enabled,
+        page=page,
+        page_count=page_count,
+        fetch_error=fetch_error,
+    )
 
 
 def _daily_hr_to_samples(daily_hr: object, start_ms: int, end_ms: int) -> list[dict]:
@@ -2027,6 +2049,141 @@ def _valid_hevy_id(hevy_id: str) -> bool:
 def _clear_workout_cache(store) -> None:
     for page in range(1, 11):
         store.set_app_config(f"hevy_workouts_page_{page}", {})
+
+
+def _cached_hr_samples(store: Any, hevy_id: str) -> list[dict] | None:
+    try:
+        cached = store.get_cached_hr(hevy_id)
+    except Exception:
+        return None
+    if isinstance(cached, dict) and isinstance(cached.get("hr_samples"), list):
+        return cached["hr_samples"] or None
+    return None
+
+
+def _best_effort_hr_samples(
+    store: Any,
+    workout: dict[str, Any],
+    config: dict[str, Any],
+) -> list[dict] | None:
+    hevy_id = str(workout.get("id") or "")
+    samples = _cached_hr_samples(store, hevy_id) if hevy_id else None
+    if samples:
+        return samples
+    try:
+        from hevy2garmin.hr import load_hr_backup
+
+        samples = load_hr_backup(store, workout)
+        if samples:
+            return samples
+    except Exception:
+        logger.debug("Strava visual upload could not use backed-up HR", exc_info=True)
+    try:
+        from hevy2garmin.garmin import get_client
+        from hevy2garmin.hr import hr_for_sync
+        from hevy2garmin.sync import _hr_limiter
+
+        garmin_id = store.get_garmin_id(hevy_id) if hevy_id else None
+        if not garmin_id:
+            return None
+        garmin_client = get_client(config.get("garmin_email"))
+        return hr_for_sync(
+            store,
+            garmin_client,
+            workout,
+            config,
+            _hr_limiter,
+            source_activity_id=garmin_id,
+        )
+    except Exception:
+        logger.debug("Strava visual upload could not fetch Garmin HR", exc_info=True)
+        return None
+
+
+def _best_effort_fit_stats(
+    workout: dict[str, Any],
+    hr_samples: list[dict] | None,
+) -> dict[str, Any]:
+    try:
+        from hevy2garmin.sync import _estimate_fit_stats
+
+        return _estimate_fit_stats(workout, hr_samples=hr_samples)
+    except Exception:
+        logger.debug("Strava visual upload could not estimate FIT stats", exc_info=True)
+        return {}
+
+
+@app.post("/api/workout/{hevy_id}/strava-visual")
+async def api_strava_visual_workout(request: Request, hevy_id: str):
+    from fastapi.responses import JSONResponse
+
+    if is_demo_mode():
+        return JSONResponse({"ok": False, "error": "Read-only in demo mode"}, status_code=403)
+    if not _valid_hevy_id(hevy_id):
+        return JSONResponse({"ok": False, "error": "Invalid workout ID"}, status_code=400)
+
+    config = load_config()
+    try:
+        from hevy2garmin.strava import visual_strength_upload_enabled
+
+        if not visual_strength_upload_enabled(config):
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": "Turn on Strava Visual Strength in Settings first.",
+                },
+                status_code=409,
+            )
+    except Exception as exc:
+        logger.warning("Strava visual upload unavailable: %s", exc)
+        return JSONResponse({"ok": False, "error": "Strava upload is unavailable"}, status_code=500)
+
+    try:
+        from hevy2garmin.hevy import HevyClient
+        from hevy2garmin.strava import try_upload_visual_strength
+
+        form = await request.form()
+        replace_existing = form.get("replace") in ("true", "1", True)
+        force_new_external_id = form.get("force_new") in ("true", "1", True)
+        store = db.get_db()
+        workout = HevyClient(api_key=config.get("hevy_api_key")).get_workout(hevy_id)
+        if not workout:
+            return JSONResponse({"ok": False, "error": "Workout not found"}, status_code=404)
+
+        hr_samples = _best_effort_hr_samples(store, workout, config)
+        fit_stats = _best_effort_fit_stats(workout, hr_samples)
+        result = try_upload_visual_strength(
+            workout,
+            config=config,
+            store=store,
+            hr_samples=hr_samples,
+            calories=fit_stats.get("calories"),
+            avg_hr=fit_stats.get("avg_hr"),
+            replace_existing=replace_existing,
+            force_new_external_id=force_new_external_id,
+        )
+        ok = result.status in {"uploaded", "updated", "replaced", "processing", "skipped"}
+        messages = {
+            "uploaded": "Sent to Strava.",
+            "updated": "Updated Strava.",
+            "replaced": "Re-synced Strava.",
+            "processing": "Strava is still processing it.",
+            "skipped": "Already sent to Strava.",
+        }
+        return JSONResponse(
+            {
+                "ok": ok,
+                "status": result.status,
+                "activity_id": result.activity_id,
+                "upload_id": result.upload_id,
+                "message": messages.get(result.status, result.error or "Strava upload failed"),
+                "error": result.error,
+            },
+            status_code=200 if ok else 502,
+        )
+    except Exception as exc:
+        logger.warning("Strava visual workout route failed: %s", exc)
+        return JSONResponse({"ok": False, "error": str(exc)[:1000]}, status_code=502)
 
 
 @app.post("/api/pending/{hevy_id}/reconcile")

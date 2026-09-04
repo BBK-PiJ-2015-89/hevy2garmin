@@ -188,13 +188,22 @@
                     Garmin
                 </a>
                 {% endif %}
-                {% if w.status == 'uploaded' and w.edited_since_sync %}
+                {% if strava_visual_enabled and w.exercises and w.status in ('uploaded', 'matched', 'manual') %}
+                <button type="button"
+                    onclick="stravaVisualWorkout('{{ w.id }}', {{ 'true' if w.strava_visual_uploaded else 'false' }}, this)"
+                    style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; background: rgba(252,76,2,0.12); color: #fc4c02; border: none; cursor: pointer;"
+                    title="{{ 'Replace the visual Strava copy with the latest Hevy details' if w.strava_visual_uploaded else 'Create the visual Strava strength copy' }}">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/></svg>
+                    {{ 'Refresh Strava' if w.strava_visual_uploaded else 'Send to Strava' }}
+                </button>
+                {% endif %}
+                {% if w.status in ('uploaded', 'matched') and w.garmin_match and w.garmin_match.garmin_id %}
                 <button type="button"
                     onclick="resyncWorkout('{{ w.id }}', this)"
                     style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; background: rgba(251,191,36,0.12); color: #fbbf24; border: none; cursor: pointer;"
                     title="Unsync and re-upload with the latest Hevy data">
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-                    Re-sync
+                    Re-sync Garmin
                 </button>
                 {% endif %}
                 {% if w.status in ('uploaded', 'manual', 'skipped') %}
@@ -368,6 +377,7 @@
 
 <script>
 const hrChartCache = {};
+const stravaVisualEnabled = {{ 'true' if strava_visual_enabled else 'false' }};
 
 async function loadHRChart(hevyId, summaryEl) {
     const container = document.getElementById('hr-chart-' + hevyId);
@@ -514,6 +524,34 @@ async function loadHRChart(hevyId, summaryEl) {
     }
 }
 
+async function postStravaVisual(hevyId, replaceExisting) {
+    const form = new FormData();
+    form.append('force_new', 'true');
+    if (replaceExisting) {
+        form.append('replace', 'true');
+    }
+    const resp = await fetch(window.APP_PREFIX + '/api/workout/' + encodeURIComponent(hevyId) + '/strava-visual', { method: 'POST', body: form });
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) throw new Error(data.error || data.message || 'Strava upload failed');
+    return data;
+}
+
+async function stravaVisualWorkout(hevyId, replaceExisting, btn) {
+    if (replaceExisting && !confirm('Replace the visual Strava strength copy with the latest Hevy details?')) return;
+    const original = btn.textContent.trim();
+    btn.disabled = true;
+    btn.textContent = replaceExisting ? 'Refreshing…' : 'Sending…';
+    try {
+        const data = await postStravaVisual(hevyId, replaceExisting);
+        alert(data.message || (replaceExisting ? 'Strava refreshed.' : 'Sent to Strava.'));
+        window.location.reload();
+    } catch (e) {
+        alert(e.message);
+        btn.disabled = false;
+        btn.textContent = original;
+    }
+}
+
 async function resyncWorkout(hevyId, btn) {
     if (!confirm('Re-sync this workout? The old Garmin activity will be deleted and a fresh one uploaded with the latest Hevy data.')) return;
     btn.disabled = true;
@@ -527,7 +565,16 @@ async function resyncWorkout(hevyId, btn) {
         if (!unsyncData.ok) { alert('Unsync failed: ' + (unsyncData.error || 'Unknown')); btn.disabled = false; btn.textContent = 'Re-sync'; return; }
         // Step 2: re-sync with force=1 (bypass dedup check)
         const syncResp = await fetch(window.APP_PREFIX + '/api/sync/' + hevyId + '?force=1', { method: 'POST' });
-        if (syncResp.ok) { window.location.reload(); }
+        if (syncResp.ok) {
+            if (stravaVisualEnabled) {
+                try {
+                    await postStravaVisual(hevyId, true);
+                } catch (e) {
+                    alert('Garmin was re-synced, but Strava was not refreshed: ' + e.message);
+                }
+            }
+            window.location.reload();
+        }
         else { alert('Re-sync upload failed. The workout is now pending — try syncing from the dashboard.'); window.location.reload(); }
     } catch (e) {
         alert('Network error: ' + e.message);
