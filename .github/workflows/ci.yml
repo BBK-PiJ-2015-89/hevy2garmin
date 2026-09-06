@@ -95,6 +95,24 @@ jobs:
     defaults:
       run:
         working-directory: web
+
+    # Exercise the app the way it is deployed. next.config.ts sets
+    # `output: "standalone"` only OFF Vercel, so without VERCEL this whole job
+    # built and served the self-hosting shape rather than the shipping one.
+    #
+    # Job-level on purpose, not per-step. `next start` re-reads next.config.ts,
+    # so setting it on the build alone leaves the server disagreeing with the
+    # build it is serving and printing a standalone warning about a
+    # non-standalone build. `process.env.VERCEL` is also read at RUNTIME by
+    # app/api/toggle-autosync/route.ts, and on Vercel that variable is always
+    # set, so job scope is the production-faithful choice rather than a
+    # convenience. Verified: vitest 213/213 and the smoke pass with it set.
+    #
+    # No coverage is traded: check-fresh-fork-web still builds without VERCEL,
+    # so the standalone path stays covered there.
+    env:
+      VERCEL: "1"
+
     steps:
       - uses: actions/checkout@v5
 
@@ -110,21 +128,8 @@ jobs:
 
       - name: Build
         # Routes are force-dynamic, so no real DB is touched at build time.
-        #
-        # VERCEL=1 selects the output shape that actually ships. next.config.ts
-        # sets `output: "standalone"` only OFF Vercel, so without this the whole
-        # job — unit tests and the Playwright smoke alike — exercises the
-        # self-hosting build rather than the deployed one. No coverage is lost:
-        # check-fresh-fork-web still builds without VERCEL and keeps the
-        # standalone path covered.
-        #
-        # Deliberately scoped to this step, NOT the job. `process.env.VERCEL` is
-        # also read at RUNTIME by app/api/toggle-autosync/route.ts, so hoisting
-        # it to job level would change app behaviour under test, not just the
-        # build shape.
         env:
           DATABASE_URL: postgres://ci:ci@localhost:5432/ci
-          VERCEL: "1"
         run: npm run build
 
       - name: Test
