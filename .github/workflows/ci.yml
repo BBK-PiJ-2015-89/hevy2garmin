@@ -95,6 +95,24 @@ jobs:
     defaults:
       run:
         working-directory: web
+
+    # Exercise the app the way it is deployed. next.config.ts sets
+    # `output: "standalone"` only OFF Vercel, so without VERCEL this whole job
+    # built and served the self-hosting shape rather than the shipping one.
+    #
+    # Job-level on purpose, not per-step. `next start` re-reads next.config.ts,
+    # so setting it on the build alone leaves the server disagreeing with the
+    # build it is serving and printing a standalone warning about a
+    # non-standalone build. `process.env.VERCEL` is also read at RUNTIME by
+    # app/api/toggle-autosync/route.ts, and on Vercel that variable is always
+    # set, so job scope is the production-faithful choice rather than a
+    # convenience. Verified: vitest 213/213 and the smoke pass with it set.
+    #
+    # No coverage is traded: check-fresh-fork-web still builds without VERCEL,
+    # so the standalone path stays covered there.
+    env:
+      VERCEL: "1"
+
     steps:
       - uses: actions/checkout@v5
 
