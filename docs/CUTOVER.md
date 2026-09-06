@@ -111,6 +111,15 @@ Cloudflare Worker from `/setup`, overridable with `GARMIN_LOGIN_WORKER_URL`. Gar
 blocks SSO from cloud IPs, which is why the web path uses the Worker rather than
 logging in directly.
 
+**`DEMO_MODE` does not hold on the web path yet ([#471](https://github.com/drkostas/hevy2garmin/issues/471)).**
+Do not flip a deployment that relies on it until that is fixed. `web/.env.example`
+says `true` means every mutating `/api` call is refused, but of the 30 route files
+under `web/app/api` exporting a `POST`, `PUT`, `PATCH` or `DELETE`, one calls
+`demoMode()`, and `proxy.ts` adds no middleware check. Python enforces it at 11
+sites. This is dormant rather than live, because the public demo still serves the
+Python dashboard, but a demo that flips to `web` stops being read-only while its
+`.env.example` still claims otherwise.
+
 ## Auth environment
 
 The web path accepts the Python names, so an existing deployment does not have to
