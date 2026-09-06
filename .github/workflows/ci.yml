@@ -117,11 +117,19 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Playwright smoke (desktop)
+      - name: Playwright smoke (desktop + mobile)
         # A production build started with only a password: no database, every page must still render.
+        #
+        # Both projects, not just desktop. The two navs are separate markup: a top
+        # bar on desktop, a bottom tab bar on mobile, and CSS shows one. A
+        # desktop-only run cannot see a mobile-only regression, and that is not
+        # hypothetical — the nav walk added in #468 passed desktop and failed
+        # mobile, because the mobile bar composes a link from an icon span and a
+        # label span, giving a different accessible name. Running one project
+        # would have shipped that green.
         run: |
           npx playwright install --with-deps chromium
-          npx playwright test --project=desktop
+          npx playwright test
         env:
           CI: "1"
 

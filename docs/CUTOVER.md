@@ -17,12 +17,22 @@ Do not flip until all of these are green on `main`:
 | Tests (Web) | web unit suite |
 | Tests (TypeScript) | the `hevy2garmin` TS package |
 | Tests (Postgres), Tests (SQLite 3.10 and 3.12) | the Python path across both stores |
-| Playwright parity smoke | all 8 pages render their no-database state, on desktop and mobile |
+| Playwright parity smoke | all 8 pages render their no-database state and are reachable from the nav, on desktop and mobile |
 
 The parity smoke runs a production build with only a password in the environment
 and no `DATABASE_URL`, because that is what a fresh fork sees before it wires Neon.
 It runs on its own port so it can never adopt a developer's dev server, which would
-otherwise pull in a real `.env.local`.
+otherwise pull in a real `.env.local`. It runs both the desktop and mobile projects,
+because the two navs are separate markup and a single-project run cannot see a
+regression in the other.
+
+What the smoke does not prove: it exercises routing, auth, rendering and nav
+reachability, not the production server shape. `next.config.ts` sets
+`output: "standalone"` only off Vercel, and the suite serves that build with
+`next start`, so the server under test matches neither Vercel's runtime nor
+`.next/standalone/server.js`. That is a deliberate trade, since forcing the
+standalone output on Vercel corrupts the Edge middleware bundle. Treat a green
+smoke as evidence the app is coherent, not as a production rehearsal.
 
 ## The flip
 
