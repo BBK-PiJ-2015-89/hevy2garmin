@@ -117,7 +117,10 @@ async function currentEpoch(origin: string): Promise<number> {
   return epochCache.n;
 }
 
-const PUBLIC_PATHS = ["/login", "/api/login", "/api/logout", "/api/session-epoch"];
+// /api/cron/* carries a bearer (Vercel Cron, the generated GitHub Actions workflow) and no
+// session cookie; each cron route checks CRON_SECRET itself. Gating it here 401'd every
+// scheduled sync before that check ran (#473).
+const PUBLIC_PATHS = ["/login", "/api/login", "/api/logout", "/api/session-epoch", "/api/cron"];
 const STATIC_PREFIX = /^\/(_next|favicon|manifest|icons|robots|sitemap)/;
 
 /** Gate every page + API route behind the shared-password session (mirrors auth.py).
