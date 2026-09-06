@@ -51,9 +51,20 @@ break deployments whose owners had not opted in.
 Clear the Root Directory field and redeploy. The next deployment serves the Python
 dashboard again.
 
-No data migration is involved in either direction. Both paths share one database,
-credentials, and sync history, so a rollback loses nothing that was synced while
-the web path was live.
+No data migration is involved in either direction, and nothing you synced while the
+web path was live is lost by going back. Nine of the ten tables are shared under
+identical names: `synced_workouts`, `pending_uploads`, `platform_credentials`,
+`custom_mappings`, `app_cache`, `hr_cache`, `routine_schedules`, `synced_routines`
+and `user_profile`.
+
+One exception, worth knowing before you roll back. `sync_log` is written only by
+the Python path, from `syncstate.record_sync_log`, and holds the per-run counts
+that feed the Python dashboard's history panel via `get_sync_log`. The web path
+never writes it, and its own `/history` page reads `synced_workouts` instead, a
+per-workout view. So while the web path is live the run-level log stops
+accumulating, and after a rollback the Python history panel shows a gap for that
+window. The per-workout record of what actually synced is unaffected, because that
+lives in the shared `synced_workouts`.
 
 Keep the Python entry point for at least one release after the flip so this remains
 a one-setting revert.
