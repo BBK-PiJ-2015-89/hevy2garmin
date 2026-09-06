@@ -67,10 +67,11 @@ Clear the Root Directory field and redeploy. The next deployment serves the Pyth
 dashboard again.
 
 No data migration is involved in either direction, and nothing you synced while the
-web path was live is lost by going back. Nine of the ten tables are shared under
-identical names: `synced_workouts`, `pending_uploads`, `platform_credentials`,
-`custom_mappings`, `app_cache`, `hr_cache`, `routine_schedules`, `synced_routines`
-and `user_profile`.
+web path was live is lost by going back. Python declares nine tables and the web
+reads and writes eight of them under identical names: `synced_workouts`,
+`pending_uploads`, `platform_credentials`, `custom_mappings`, `app_cache`,
+`hr_cache`, `routine_schedules` and `synced_routines`. (`user_profile` is not a
+table; it is a key inside `app_cache`.)
 
 One exception, worth knowing before you roll back. `sync_log` is written only by
 the Python path, from `syncstate.record_sync_log`, and holds the per-run counts
