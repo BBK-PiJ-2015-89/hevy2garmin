@@ -48,9 +48,22 @@ regression in the other.
 A gap the gate does not close, which is how #475 survived a fully green suite.
 The smoke runs with no `DATABASE_URL` at all, and the fresh-fork job proves the
 app installs, builds and answers with a bare environment but never provisions a
-database. Neither covers a database that is present and empty, which is exactly
-where a forker lands after adding Neon as the README tells them to. Until
-something covers that, a green gate says nothing about a first-run fork.
+database. Neither covered a database that is present and empty, which is exactly
+where a forker lands after adding Neon as the README tells them to.
+`Web against an empty database` now covers that, asserting a write round-trips
+and the row actually lands, since reads return 200 either way.
+
+**The green `Vercel` check on a PR is not about the web app
+([#478](https://github.com/drkostas/hevy2garmin/issues/478)).** `hevy2garmin-demo`
+is the project linked to this repository, so it produces every preview, and it
+builds the Python dashboard. `hevy2garmin-web` has no GitHub link at all and
+therefore cannot produce one; its last deployment was manual. So nothing verifies
+that the web app deploys on Vercel, which is the thing the cutover moves everyone
+to. That matters because `next.config.ts` switches output on `process.env.VERCEL`,
+making the build that ships to Vercel different from the one every local and CI
+check exercises, and because #466 already hit a failure that reproduced only on
+Vercel. Before flipping, at minimum redeploy `hevy2garmin-web` from current
+`main` and exercise it.
 
 What the smoke does not prove: it exercises routing, auth, rendering and nav
 reachability, not the production server shape. `next.config.ts` sets
