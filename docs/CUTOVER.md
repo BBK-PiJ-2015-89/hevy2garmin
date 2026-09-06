@@ -8,6 +8,15 @@ project setting, not a code change, which is what makes it reversible.
 
 ## The gate
 
+**Blocked right now.** Do not flip any deployment until
+[#473](https://github.com/drkostas/hevy2garmin/issues/473) is fixed: with auth
+configured, which `web/.env.example` marks as required, the middleware answers
+`/api/cron/*` with a 401 before the route can check `CRON_SECRET`, so scheduled
+syncing does not run at all on the web path. Python exempts those paths, so the
+same deployment syncs on Python and silently stops on the web. Verified against a
+production build, and the one-line fix is verified in that issue too.
+
+
 Do not flip until all of these are green on `main`:
 
 | Check | What it proves |
