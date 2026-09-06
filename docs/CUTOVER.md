@@ -17,12 +17,22 @@ Do not flip until all of these are green on `main`:
 | Tests (Web) | web unit suite |
 | Tests (TypeScript) | the `hevy2garmin` TS package |
 | Tests (Postgres), Tests (SQLite 3.10 and 3.12) | the Python path across both stores |
-| Playwright parity smoke | all 8 pages render their no-database state, on desktop and mobile |
+| Playwright parity smoke | all 8 pages render their no-database state and are reachable from the nav, on desktop and mobile |
 
 The parity smoke runs a production build with only a password in the environment
 and no `DATABASE_URL`, because that is what a fresh fork sees before it wires Neon.
 It runs on its own port so it can never adopt a developer's dev server, which would
-otherwise pull in a real `.env.local`.
+otherwise pull in a real `.env.local`. It runs both the desktop and mobile projects,
+because the two navs are separate markup and a single-project run cannot see a
+regression in the other.
+
+What the smoke does not prove: it exercises routing, auth, rendering and nav
+reachability, not the production server shape. `next.config.ts` sets
+`output: "standalone"` only off Vercel, and the suite serves that build with
+`next start`, so the server under test matches neither Vercel's runtime nor
+`.next/standalone/server.js`. That is a deliberate trade, since forcing the
+standalone output on Vercel corrupts the Edge middleware bundle. Treat a green
+smoke as evidence the app is coherent, not as a production rehearsal.
 
 ## The flip
 
@@ -36,14 +46,40 @@ A fork that leaves Root Directory empty keeps deploying the Python dashboard fro
 `vercel.json`: a config change would reach every fork on its next "Sync fork" and
 break deployments whose owners had not opted in.
 
+### Garmin tokens heal themselves
+
+The one failure that would hurt every fork at once is the flat-versus-nested token
+shape (#459). garmin-auth below 0.3 wrote the DI payload flat; 0.3 and later nest
+it under `garmin_tokens`, which is the only shape either store reads. A fork whose
+row predates that change would be told to reconnect Garmin, and would have to redo
+MFA, for no real reason.
+
+Both paths self-heal, so this needs no action at the flip. Python runs the fix in
+its schema init in `db_postgres.py`. The web runs the same statement in
+`normalizeGarminTokenRow`, called from `getGarminClient` before `DBTokenStore` is
+built. Both are idempotent, both are guarded on `credentials ? 'di_token' AND NOT
+(credentials ? 'garmin_tokens')`, and the web's never throws. A fork that flips to
+the web path and never runs Python again still heals on its first Garmin call.
+
 ## Rollback
 
 Clear the Root Directory field and redeploy. The next deployment serves the Python
 dashboard again.
 
-No data migration is involved in either direction. Both paths share one database,
-credentials, and sync history, so a rollback loses nothing that was synced while
-the web path was live.
+No data migration is involved in either direction, and nothing you synced while the
+web path was live is lost by going back. Nine of the ten tables are shared under
+identical names: `synced_workouts`, `pending_uploads`, `platform_credentials`,
+`custom_mappings`, `app_cache`, `hr_cache`, `routine_schedules`, `synced_routines`
+and `user_profile`.
+
+One exception, worth knowing before you roll back. `sync_log` is written only by
+the Python path, from `syncstate.record_sync_log`, and holds the per-run counts
+that feed the Python dashboard's history panel via `get_sync_log`. The web path
+never writes it, and its own `/history` page reads `synced_workouts` instead, a
+per-workout view. So while the web path is live the run-level log stops
+accumulating, and after a rollback the Python history panel shows a gap for that
+window. The per-workout record of what actually synced is unaffected, because that
+lives in the shared `synced_workouts`.
 
 Keep the Python entry point for at least one release after the flip so this remains
 a one-setting revert.
