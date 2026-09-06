@@ -249,21 +249,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Install the Python package (for the schema bootstrap)
-        run: pip install -e ".[cloud]"
-
-      - name: Create the schema, insert nothing
+      # No Python bootstrap here on purpose (#475): the database starts with zero
+      # tables and the web app must create them itself on first use. Putting the
+      # Python _ensure_tables() back would hide the exact bug this job exists for.
+      - name: The database really is empty
         run: |
-          python -c "
-          import os
-          from hevy2garmin.db_postgres import PostgresDatabase
-          PostgresDatabase(os.environ['DATABASE_URL'])._ensure_tables()
-          print('schema created')
-          "
+          N=$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")
+          echo "tables before: $N"
+          [ "$N" = "0" ] || { echo "expected an empty database"; exit 1; }
 
       - uses: actions/setup-node@v4
         with:
@@ -303,6 +296,13 @@ jobs:
             cat start.log
             exit 1
           fi
+
+      - name: The web app created the nine tables itself
+        run: |
+          for t in synced_workouts sync_log hr_cache pending_uploads platform_credentials custom_mappings app_cache synced_routines routine_schedules; do
+            psql "$DATABASE_URL" -tAc "SELECT to_regclass('public.$t')" | grep -qx "$t" || { echo "missing table: $t"; exit 1; }
+          done
+          echo "all nine tables present"
 
       - name: The write must have persisted, not just returned 200
         run: |
