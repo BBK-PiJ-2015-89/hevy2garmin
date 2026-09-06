@@ -46,6 +46,21 @@ A fork that leaves Root Directory empty keeps deploying the Python dashboard fro
 `vercel.json`: a config change would reach every fork on its next "Sync fork" and
 break deployments whose owners had not opted in.
 
+### Garmin tokens heal themselves
+
+The one failure that would hurt every fork at once is the flat-versus-nested token
+shape (#459). garmin-auth below 0.3 wrote the DI payload flat; 0.3 and later nest
+it under `garmin_tokens`, which is the only shape either store reads. A fork whose
+row predates that change would be told to reconnect Garmin, and would have to redo
+MFA, for no real reason.
+
+Both paths self-heal, so this needs no action at the flip. Python runs the fix in
+its schema init in `db_postgres.py`. The web runs the same statement in
+`normalizeGarminTokenRow`, called from `getGarminClient` before `DBTokenStore` is
+built. Both are idempotent, both are guarded on `credentials ? 'di_token' AND NOT
+(credentials ? 'garmin_tokens')`, and the web's never throws. A fork that flips to
+the web path and never runs Python again still heals on its first Garmin call.
+
 ## Rollback
 
 Clear the Root Directory field and redeploy. The next deployment serves the Python
