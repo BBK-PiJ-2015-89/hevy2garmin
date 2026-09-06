@@ -110,8 +110,21 @@ jobs:
 
       - name: Build
         # Routes are force-dynamic, so no real DB is touched at build time.
+        #
+        # VERCEL=1 selects the output shape that actually ships. next.config.ts
+        # sets `output: "standalone"` only OFF Vercel, so without this the whole
+        # job — unit tests and the Playwright smoke alike — exercises the
+        # self-hosting build rather than the deployed one. No coverage is lost:
+        # check-fresh-fork-web still builds without VERCEL and keeps the
+        # standalone path covered.
+        #
+        # Deliberately scoped to this step, NOT the job. `process.env.VERCEL` is
+        # also read at RUNTIME by app/api/toggle-autosync/route.ts, so hoisting
+        # it to job level would change app behaviour under test, not just the
+        # build shape.
         env:
           DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+          VERCEL: "1"
         run: npm run build
 
       - name: Test
