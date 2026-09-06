@@ -8,8 +8,18 @@ project setting, not a code change, which is what makes it reversible.
 
 ## The gate
 
-**Blocked right now.** Do not flip any deployment until
-[#473](https://github.com/drkostas/hevy2garmin/issues/473) is fixed: with auth
+**Blocked right now, on two issues.**
+
+[#475](https://github.com/drkostas/hevy2garmin/issues/475) affects new forks. The
+web path never creates its schema, while the Python path has nine
+`CREATE TABLE IF NOT EXISTS` statements. A fork that follows the recommended
+Root Directory `web` against a fresh Neon database gets pages that all render
+200 and writes that all fail with `relation "app_cache" does not exist`. The
+dashboard looks healthy and cannot save anything, and setup cannot be completed
+because the Hevy key writes to `platform_credentials`. Verified against an empty
+local database.
+
+[#473](https://github.com/drkostas/hevy2garmin/issues/473) affects existing ones: with auth
 configured, which `web/.env.example` marks as required, the middleware answers
 `/api/cron/*` with a 401 before the route can check `CRON_SECRET`, so scheduled
 syncing does not run at all on the web path. Python exempts those paths, so the
@@ -34,6 +44,13 @@ It runs on its own port so it can never adopt a developer's dev server, which wo
 otherwise pull in a real `.env.local`. It runs both the desktop and mobile projects,
 because the two navs are separate markup and a single-project run cannot see a
 regression in the other.
+
+A gap the gate does not close, which is how #475 survived a fully green suite.
+The smoke runs with no `DATABASE_URL` at all, and the fresh-fork job proves the
+app installs, builds and answers with a bare environment but never provisions a
+database. Neither covers a database that is present and empty, which is exactly
+where a forker lands after adding Neon as the README tells them to. Until
+something covers that, a green gate says nothing about a first-run fork.
 
 What the smoke does not prove: it exercises routing, auth, rendering and nav
 reachability, not the production server shape. `next.config.ts` sets
