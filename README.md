@@ -586,6 +586,27 @@ name like `Europe/Berlin`) and the tool stamps your local time into the uploaded
 file, so the correct offset travels with the activity. Leave it blank to keep the
 previous UTC behaviour.
 
+**Why does Garmin Connect show different calories than hevy2garmin calculated?**
+hevy2garmin writes its Keytel estimate into the FIT file (session and lap
+`total_calories`). When the file also carries heart-rate samples, Garmin Connect
+discards that value and recomputes calories from the HR with its own model and
+the weight, age and gender in your Garmin profile. That model is tuned for steady
+cardio, so lifting sessions often come out lower than our estimate. The only lever
+on Garmin's side is your Garmin Connect profile. Dropping HR from the upload would
+keep our number but lose the HR graph and everything Garmin derives from HR, so
+the tool keeps HR. Reported in [#343](https://github.com/drkostas/hevy2garmin/issues/343).
+
+**Why is there no Training Effect or recovery time on a synced workout?**
+Garmin computes aerobic and anaerobic Training Effect, recovery time and body
+battery impact only for activities its own devices recorded. The FIT format has
+fields for them, but Garmin Connect ignores those fields on third-party uploads.
+If you record the session on your watch and enable
+[Enhance Watch Activities](#enhance-watch-activities-opt-in), Garmin keeps the
+metrics it computed and the tool adds your Hevy sets to that same activity.
+Hevy-only workouts cannot get them. See
+[#324](https://github.com/drkostas/hevy2garmin/issues/324) and
+[#325](https://github.com/drkostas/hevy2garmin/issues/325).
+
 **Does 2FA / MFA work on Garmin?**
 Native 2FA support is in progress (tracked in
 [#29 on garmin-auth](https://github.com/drkostas/garmin-auth/issues/29)). For now,
