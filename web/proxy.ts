@@ -117,14 +117,40 @@ async function currentEpoch(origin: string): Promise<number> {
   return epochCache.n;
 }
 
-const PUBLIC_PATHS = ["/login", "/api/login", "/api/logout", "/api/session-epoch"];
+// /api/cron/* carries a bearer (Vercel Cron, the generated GitHub Actions workflow) and no
+// session cookie; each cron route checks CRON_SECRET itself. Gating it here 401'd every
+// scheduled sync before that check ran (#473).
+const PUBLIC_PATHS = ["/login", "/api/login", "/api/logout", "/api/session-epoch", "/api/cron"];
 const STATIC_PREFIX = /^\/(_next|favicon|manifest|icons|robots|sitemap)/;
+
+/* Demo mode (#471). Mirrors lib/demo.ts (inlined: the proxy bundler rejects
+   cross-module imports). The public demo is read-only: one guard here refuses
+   every mutating /api call instead of 30 route-level checks, of which exactly
+   one existed. Signing in and out stays allowed so the demo can be browsed. */
+const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const DEMO_ALLOWED = ["/api/login", "/api/logout"];
+function demoMode(): boolean {
+  const v = (process.env.DEMO_MODE ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+function demoRefusal(): NextResponse {
+  return NextResponse.json({ ok: false, error: "Read-only in demo mode" }, { status: 403 });
+}
 
 /** Gate every page + API route behind the shared-password session (mirrors auth.py).
     When no secret/password is set, auth is disabled and everything is open. */
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (STATIC_PREFIX.test(pathname)) return NextResponse.next();
+  // Before the auth gate on purpose: a demo with auth disabled is still read-only.
+  if (
+    demoMode() &&
+    pathname.startsWith("/api/") &&
+    MUTATING.has(req.method.toUpperCase()) &&
+    !DEMO_ALLOWED.some((p) => pathname === p || pathname.startsWith(`${p}/`))
+  ) {
+    return demoRefusal();
+  }
   if (!authEnabled()) return NextResponse.next();
   // Let the epoch endpoint through BEFORE reading the epoch, or currentEpoch()
   // (which fetches it) would recurse into the proxy forever.

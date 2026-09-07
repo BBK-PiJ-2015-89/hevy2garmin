@@ -6,6 +6,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- The Next.js web dashboard in `web/` is now the recommended Vercel deploy: set **Root Directory** to `web` when importing a fork, or change it in an existing project's settings and redeploy ([#456](https://github.com/drkostas/hevy2garmin/issues/456)). The Python dashboard keeps working for existing deployments (Root Directory empty) but no longer gets new features. Both read the same database and credential rows.
+
+### Added
+- Web dashboard: a fresh-fork CI check (install from the lockfile, build, answer with a bare environment), `web/.env.example`, and a README section ([#462](https://github.com/drkostas/hevy2garmin/pull/462)).
+- Web dashboard: the GitHub token can be saved in-app and the auto-sync GitHub Actions workflow is created from the dashboard, with the generated workflow tested against the Python generator's output ([#463](https://github.com/drkostas/hevy2garmin/pull/463)).
+- Web dashboard: `H2G_SECRET` and `H2G_PASSWORD_HASH` (argon2) work the same as in the Python dashboard ([#464](https://github.com/drkostas/hevy2garmin/pull/464)).
+- Web dashboard: pull the Garmin profile, sync all routines at once, `/sync` redirects to the dashboard, and a Playwright smoke test runs in CI ([#465](https://github.com/drkostas/hevy2garmin/pull/465)).
+- `docs/CUTOVER.md`, a runbook for moving a deployment to the web dashboard: the checks that gate the flip, the one Vercel setting that performs it, the one that reverses it, and the behaviour you inherit ([#468](https://github.com/drkostas/hevy2garmin/pull/468), [#469](https://github.com/drkostas/hevy2garmin/pull/469)). It calls out that intervals.icu cleanup is Python-only, so `INTERVALS_API_KEY` goes inert and deleted watch duplicates stay on intervals.icu, and that `sync_log` is written only by the Python path, so its history panel shows a gap for any window the web path was live.
+
+### Fixed
+- Garmin credential rows written flat by the Python login are read by the web dashboard, and nested rows written by the web dashboard are read by the Python one; both self-heal on start ([#463](https://github.com/drkostas/hevy2garmin/pull/463)).
+- The web parity smoke covers all eight pages, not six, and checks each is reachable by clicking the nav rather than only by direct URL ([#468](https://github.com/drkostas/hevy2garmin/pull/468)).
+- The parity smoke runs on its own port instead of the one `npm run dev` uses, so it can no longer attach to a running dev server and test against that developer's `.env.local` and database ([#468](https://github.com/drkostas/hevy2garmin/pull/468)).
+- CI runs the mobile Playwright project as well as desktop. The two navs are separate markup, so a mobile-only regression previously merged green ([#469](https://github.com/drkostas/hevy2garmin/pull/469)).
+
 ## [0.10.1] - 2026-08-30
 
 ### Fixed

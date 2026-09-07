@@ -95,6 +95,24 @@ jobs:
     defaults:
       run:
         working-directory: web
+
+    # Exercise the app the way it is deployed. next.config.ts sets
+    # `output: "standalone"` only OFF Vercel, so without VERCEL this whole job
+    # built and served the self-hosting shape rather than the shipping one.
+    #
+    # Job-level on purpose, not per-step. `next start` re-reads next.config.ts,
+    # so setting it on the build alone leaves the server disagreeing with the
+    # build it is serving and printing a standalone warning about a
+    # non-standalone build. `process.env.VERCEL` is also read at RUNTIME by
+    # app/api/toggle-autosync/route.ts, and on Vercel that variable is always
+    # set, so job scope is the production-faithful choice rather than a
+    # convenience. Verified: vitest 213/213 and the smoke pass with it set.
+    #
+    # No coverage is traded: check-fresh-fork-web still builds without VERCEL,
+    # so the standalone path stays covered there.
+    env:
+      VERCEL: "1"
+
     steps:
       - uses: actions/checkout@v5
 
@@ -117,11 +135,19 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Playwright smoke (desktop)
+      - name: Playwright smoke (desktop + mobile)
         # A production build started with only a password: no database, every page must still render.
+        #
+        # Both projects, not just desktop. The two navs are separate markup: a top
+        # bar on desktop, a bottom tab bar on mobile, and CSS shows one. A
+        # desktop-only run cannot see a mobile-only regression, and that is not
+        # hypothetical — the nav walk added in #468 passed desktop and failed
+        # mobile, because the mobile bar composes a link from an icon span and a
+        # label span, giving a different accessible name. Running one project
+        # would have shipped that green.
         run: |
           npx playwright install --with-deps chromium
-          npx playwright test --project=desktop
+          npx playwright test
         env:
           CI: "1"
 
@@ -207,3 +233,100 @@ jobs:
             case "$code" in 2*|3*) echo "GET /login -> $code"; exit 0;; esac
           done
           echo "dashboard did not answer on /login"; cat start.log; exit 1
+
+  check-web-empty-db:
+    # The gap that let #475 through. check-web runs the Playwright smoke with NO
+    # DATABASE_URL, and check-fresh-fork-web never provisions a database, so
+    # nothing covered a database that is PRESENT and EMPTY — which is exactly
+    # where a forker lands after adding Neon as the README tells them to.
+    # Reads were never the problem: every page returns 200 against an empty
+    # database. This asserts a WRITE round-trips, which is what actually broke.
+    name: Web against an empty database
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: h2g_empty
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/h2g_empty
+      H2G_PASSWORD: ci-test-password
+      HEVY2GARMIN_SECRET: ci-test-secret-32-chars-abcdefgh
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # No Python bootstrap here on purpose (#475): the database starts with zero
+      # tables and the web app must create them itself on first use. Putting the
+      # Python _ensure_tables() back would hide the exact bug this job exists for.
+      - name: The database really is empty
+        run: |
+          N=$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")
+          echo "tables before: $N"
+          [ "$N" = "0" ] || { echo "expected an empty database"; exit 1; }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install and build the web app
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: A write must round-trip against an empty database
+        working-directory: web
+        run: |
+          npx next start --port 8100 --hostname 127.0.0.1 > start.log 2>&1 &
+          for i in $(seq 1 40); do
+            sleep 1
+            curl -sf -o /dev/null http://127.0.0.1:8100/login && break
+          done
+
+          COOKIE=$(curl -s -i -X POST -H 'Content-Type: application/json' \
+            -d '{"password":"'"$H2G_PASSWORD"'"}' \
+            http://127.0.0.1:8100/api/login \
+            | grep -i '^set-cookie:' | head -1 | sed 's/^[Ss]et-[Cc]ookie: //' | cut -d';' -f1)
+          if [ -z "$COOKIE" ]; then echo "could not authenticate"; cat start.log; exit 1; fi
+
+          CODE=$(curl -s -o body.json -w '%{http_code}' -X POST \
+            -H 'Content-Type: application/json' -H "Cookie: $COOKIE" \
+            -d '{"auto_sync":{"enabled":true,"interval_minutes":720}}' \
+            http://127.0.0.1:8100/api/settings)
+
+          echo "POST /api/settings -> $CODE"; cat body.json; echo
+          if [ "$CODE" != "200" ]; then
+            echo "A write failed against an empty database. See #475."
+            cat start.log
+            exit 1
+          fi
+
+      - name: The web app created the nine tables itself
+        run: |
+          for t in synced_workouts sync_log hr_cache pending_uploads platform_credentials custom_mappings app_cache synced_routines routine_schedules; do
+            psql "$DATABASE_URL" -tAc "SELECT to_regclass('public.$t')" | grep -qx "$t" || { echo "missing table: $t"; exit 1; }
+          done
+          echo "all nine tables present"
+
+      - name: The write must have persisted, not just returned 200
+        run: |
+          VAL=$(psql "$DATABASE_URL" -At -c "SELECT value::text FROM app_cache WHERE key='auto_sync';")
+          echo "app_cache.auto_sync = $VAL"
+          case "$VAL" in
+            *720*) echo "persisted";;
+            *) echo "the row is missing or wrong; a 200 was returned without a durable write"; exit 1;;
+          esac
