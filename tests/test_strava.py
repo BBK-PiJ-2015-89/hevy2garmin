@@ -104,12 +104,25 @@ def test_lunge_variants_upload_as_generic_strava_lunge_with_weight() -> None:
                 "title": "Weighted Lunge",
                 "sets": [{"type": "normal", "weight_kg": 20, "reps": 6}],
             },
+            {
+                "title": "Reverse Lunge (Dumbbell)",
+                "sets": [{"type": "normal", "weight_kg": 16, "reps": 8}],
+            },
+            {
+                "title": "Walking Lunge (Dumbbell)",
+                "sets": [{"type": "normal", "weight_kg": 12, "reps": 10}],
+            },
         ],
     }
 
     payload = build_strength_payload(workout, config=_config())
 
-    assert [item["exercise_type"] for item in payload["sets"]] == ["LUNGE", "LUNGE"]
+    assert [item["exercise_type"] for item in payload["sets"]] == [
+        "LUNGE_GENERIC",
+        "LUNGE_GENERIC",
+        "DUMBBELL_REVERSE_LUNGE",
+        "DUMBBELL_WALKING_LUNGES",
+    ]
     assert payload["sets"][0]["weight"] == 14.0
     assert payload["sets"][1]["weight"] == 20.0
 

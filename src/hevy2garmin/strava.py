@@ -34,6 +34,30 @@ _DESCRIPTION_FOOTER = (
     "with Garmin HR, polished for Strava."
 )
 
+_STRAVA_EXERCISE_ALIASES = {
+    "LUNGE": "LUNGE_GENERIC",
+    "DUMBBELL_LUNGE": "LUNGE_GENERIC",
+    "WEIGHTED_LUNGE": "LUNGE_GENERIC",
+    "WALKING_DUMBBELL_LUNGE": "DUMBBELL_WALKING_LUNGES",
+    "WEIGHTED_WALKING_LUNGE": "WALKING_LUNGE",
+    "DUMBBELL_BULGARIAN_SPLIT_SQUAT": "DUMBBELL_BULGARIAN_SPLIT_SQUATS",
+}
+
+_STRAVA_TITLE_EXERCISE_TYPES = {
+    "bulgariansplitsquatdumbbell": "DUMBBELL_BULGARIAN_SPLIT_SQUATS",
+    "curtsylungedumbbell": "CURTSY_LUNGE",
+    "laterallunge": "LATERAL_LUNGE",
+    "lunge": "LUNGE_GENERIC",
+    "lungedumbbell": "LUNGE_GENERIC",
+    "weightedlunge": "LUNGE_GENERIC",
+    "reverselunge": "REVERSE_LUNGE",
+    "reverselungebarbell": "BARBELL_REVERSE_LUNGE",
+    "reverselungedumbbell": "DUMBBELL_REVERSE_LUNGE",
+    "walkinglunge": "WALKING_LUNGE",
+    "walkinglungedumbbell": "DUMBBELL_WALKING_LUNGES",
+    "walkinglungesandbag": "SANDBAG_LUNGE",
+}
+
 
 @dataclass
 class StravaCredentials:
@@ -245,13 +269,18 @@ def _set_timeline(
     return all_sets
 
 
+def _title_key(title: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", title.lower())
+
+
 def _exercise_type(exercise: dict[str, Any]) -> str | None:
     title = exercise.get("title") or exercise.get("name") or ""
+    title_override = _STRAVA_TITLE_EXERCISE_TYPES.get(_title_key(str(title)))
+    if title_override:
+        return title_override
     cat, sub, _ = lookup_exercise(title, exercise.get("exercise_template_id"))
     _, exercise_name = fit_exercise_strings(cat, sub)
-    if exercise_name and "LUNGE" in exercise_name:
-        return "LUNGE"
-    return exercise_name
+    return _STRAVA_EXERCISE_ALIASES.get(exercise_name, exercise_name)
 
 
 def _build_sets(
