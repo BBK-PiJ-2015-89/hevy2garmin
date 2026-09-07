@@ -52,6 +52,7 @@ function fakeGithub(overrides: Partial<Record<string, (init?: RequestInit) => Re
     if (key === "GET o/r/contents/.github/workflows/sync.yml") return new Response(JSON.stringify({ sha: "abc" }), { status: 200 });
     if (key === "PUT o/r/actions/secrets/DATABASE_URL") return new Response(null, { status: 201 });
     if (key === "PUT o/r/contents/.github/workflows/sync.yml") return new Response("{}", { status: 200 });
+    if (key === "PUT o/r/actions/workflows/sync.yml/enable") return new Response(null, { status: 204 });
     if (key === "POST o/r/dispatches") return new Response(null, { status: 204 });
     if (key === "DELETE o/r/contents/.github/workflows/sync.yml") return new Response("{}", { status: 200 });
     return new Response("nope", { status: 404 });
@@ -68,7 +69,8 @@ describe("setupGithubActions", () => {
     const seq = calls.map((c) => `${c.method} ${c.path}`);
     expect(seq.slice(0, 4).sort()).toEqual(["GET o/r/actions/secrets/public-key", "GET o/r/contents/.github/workflows/sync.yml", "PATCH o/r", "PUT o/r/actions/permissions"].sort());
     expect(seq.slice(4, 6).sort()).toEqual(["PUT o/r/actions/secrets/DATABASE_URL", "PUT o/r/contents/.github/workflows/sync.yml"].sort());
-    expect(seq[6]).toBe("POST o/r/dispatches");
+    expect(seq[6]).toBe("PUT o/r/actions/workflows/sync.yml/enable");
+    expect(seq[7]).toBe("POST o/r/dispatches");
     const wf = calls.find((c) => c.method === "PUT" && c.path.endsWith("sync.yml"))!.body as { sha: string; content: string; message: string };
     expect(wf.sha).toBe("abc"); expect(wf.message).toBe("feat: auto-sync every 4 hours");
     expect(Buffer.from(wf.content, "base64").toString("utf8")).toBe(buildSyncWorkflowYaml(240));

@@ -2605,6 +2605,17 @@ async def _setup_github_actions(interval_minutes: int = 120) -> tuple[bool, str]
         if secret_resp.status_code not in (200, 201, 204):
             return False, f"Failed to set DATABASE_URL secret: HTTP {secret_resp.status_code}"
 
+        try:
+            await asyncio.to_thread(
+                lambda: req.put(
+                    f"{base}/actions/workflows/sync.yml/enable",
+                    headers=headers,
+                    timeout=10,
+                )
+            )
+        except Exception:
+            pass
+
         # Fire-and-forget initial sync trigger (don't block on it)
         async def _trigger_initial_sync():
             try:
