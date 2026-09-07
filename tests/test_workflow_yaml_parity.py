@@ -16,11 +16,11 @@ def test_workflow_yaml_matches_golden():
 
 
 def test_cron_table():
-    assert _minutes_to_cron(30) == "*/30 * * * *"
-    assert _minutes_to_cron(60) == "0 * * * *"
-    assert _minutes_to_cron(240) == "0 */4 * * *"
-    assert _minutes_to_cron(1440) == "0 0 * * *"
-    assert _minutes_to_cron(45) == "0 */2 * * *"
+    assert _minutes_to_cron(30) == "13,43 * * * *"
+    assert _minutes_to_cron(60) == "13 * * * *"
+    assert _minutes_to_cron(240) == "13 */4 * * *"
+    assert _minutes_to_cron(1440) == "13 0 * * *"
+    assert _minutes_to_cron(45) == "13 */2 * * *"
 
 
 @pytest.mark.skipif(not os.environ.get("DATABASE_URL"), reason="DATABASE_URL not set")

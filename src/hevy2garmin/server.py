@@ -2449,19 +2449,19 @@ def _minutes_to_cron(minutes: int) -> str:
     """Convert an interval in minutes to a GitHub Actions cron expression.
 
     Supports the discrete values exposed in the dashboard select:
-    30, 60, 120, 240, 360, 720, 1440. Falls back to '0 */2 * * *' for
+    30, 60, 120, 240, 360, 720, 1440. Falls back to '13 */2 * * *' for
     anything unexpected.
     """
     if minutes == 30:
-        return "*/30 * * * *"
+        return "13,43 * * * *"
     if minutes == 60:
-        return "0 * * * *"
+        return "13 * * * *"
     if minutes == 1440:
-        return "0 0 * * *"
+        return "13 0 * * *"
     if minutes >= 60 and minutes % 60 == 0:
         hours = minutes // 60
-        return f"0 */{hours} * * *"
-    return "0 */2 * * *"
+        return f"13 */{hours} * * *"
+    return "13 */2 * * *"
 
 
 def _build_sync_workflow_yaml(interval_minutes: int) -> str:

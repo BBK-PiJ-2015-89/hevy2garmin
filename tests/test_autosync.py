@@ -28,13 +28,13 @@ class TestMinutesToCron:
     @pytest.mark.parametrize(
         "minutes,expected",
         [
-            (30, "*/30 * * * *"),
-            (60, "0 * * * *"),
-            (120, "0 */2 * * *"),
-            (240, "0 */4 * * *"),
-            (360, "0 */6 * * *"),
-            (720, "0 */12 * * *"),
-            (1440, "0 0 * * *"),
+            (30, "13,43 * * * *"),
+            (60, "13 * * * *"),
+            (120, "13 */2 * * *"),
+            (240, "13 */4 * * *"),
+            (360, "13 */6 * * *"),
+            (720, "13 */12 * * *"),
+            (1440, "13 0 * * *"),
         ],
     )
     def test_supported_intervals(self, minutes: int, expected: str) -> None:
@@ -42,8 +42,8 @@ class TestMinutesToCron:
 
     def test_fallback_for_unexpected_value(self) -> None:
         # Anything not on the supported list falls back to every-2-hours
-        assert _minutes_to_cron(45) == "0 */2 * * *"
-        assert _minutes_to_cron(0) == "0 */2 * * *"
+        assert _minutes_to_cron(45) == "13 */2 * * *"
+        assert _minutes_to_cron(0) == "13 */2 * * *"
 
 
 class TestFormatIntervalLabel:
@@ -64,15 +64,15 @@ class TestFormatIntervalLabel:
 class TestBuildSyncWorkflowYaml:
     def test_cron_reflects_interval(self) -> None:
         yml = _build_sync_workflow_yaml(30)
-        assert "cron: '*/30 * * * *'" in yml
+        assert "cron: '13,43 * * * *'" in yml
 
     def test_default_2h(self) -> None:
         yml = _build_sync_workflow_yaml(120)
-        assert "cron: '0 */2 * * *'" in yml
+        assert "cron: '13 */2 * * *'" in yml
 
     def test_24h(self) -> None:
         yml = _build_sync_workflow_yaml(1440)
-        assert "cron: '0 0 * * *'" in yml
+        assert "cron: '13 0 * * *'" in yml
 
 class TestSyncLock:
     def test_acquire_and_release(self) -> None:

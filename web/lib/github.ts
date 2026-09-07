@@ -59,11 +59,11 @@ export async function triggerViaActions(pat: string, repo: string): Promise<bool
 
 /** Interval (minutes) → cron. Same table as the Python dashboard's select: 30, 60, 120, 240, 360, 720, 1440. */
 export function minutesToCron(minutes: number): string {
-  if (minutes === 30) return "*/30 * * * *";
-  if (minutes === 60) return "0 * * * *";
-  if (minutes === 1440) return "0 0 * * *";
-  if (minutes >= 60 && minutes % 60 === 0) return `0 */${Math.floor(minutes / 60)} * * *`;
-  return "0 */2 * * *";
+  if (minutes === 30) return "13,43 * * * *";
+  if (minutes === 60) return "13 * * * *";
+  if (minutes === 1440) return "13 0 * * *";
+  if (minutes >= 60 && minutes % 60 === 0) return `13 */${Math.floor(minutes / 60)} * * *`;
+  return "13 */2 * * *";
 }
 
 export function formatIntervalLabel(minutes: number): string {

@@ -193,6 +193,45 @@ def _format_iso_z(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _format_iso_offset(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat(timespec="seconds")
+
+
+def _is_uk_timezone(tz_name: str) -> bool:
+    return tz_name.lower() in {"europe/london", "gb", "gb-eire"}
+
+
+def _last_sunday_at_1am_utc(year: int, month: int) -> datetime:
+    day = 31
+    while datetime(year, month, day).weekday() != 6:
+        day -= 1
+    return datetime(year, month, day, 1, tzinfo=timezone.utc)
+
+
+def _uk_utc_offset_seconds(at: datetime) -> int:
+    probe = at.replace(tzinfo=timezone.utc) if at.tzinfo is None else at
+    probe_utc = probe.astimezone(timezone.utc)
+    bst_start = _last_sunday_at_1am_utc(probe_utc.year, 3)
+    bst_end = _last_sunday_at_1am_utc(probe_utc.year, 10)
+    return 3600 if bst_start <= probe_utc < bst_end else 0
+
+
+def _strava_local_time(dt: datetime, config: dict[str, Any] | None) -> datetime:
+    tz_name = str(
+        ((config or {}).get("user_profile") or {}).get("timezone") or ""
+    ).strip()
+    if not tz_name:
+        return dt
+    try:
+        return dt.astimezone(ZoneInfo(tz_name))
+    except (ZoneInfoNotFoundError, ValueError):
+        if _is_uk_timezone(tz_name):
+            return dt.astimezone(timezone(timedelta(seconds=_uk_utc_offset_seconds(dt))))
+        return dt
+
+
 def _utc_offset_seconds(config: dict[str, Any] | None, at: datetime) -> int:
     tz_name = str(
         ((config or {}).get("user_profile") or {}).get("timezone") or ""
@@ -202,6 +241,8 @@ def _utc_offset_seconds(config: dict[str, Any] | None, at: datetime) -> int:
     try:
         offset = at.astimezone(ZoneInfo(tz_name)).utcoffset()
     except (ZoneInfoNotFoundError, ValueError):
+        if _is_uk_timezone(tz_name):
+            return _uk_utc_offset_seconds(at)
         return 0
     return int(offset.total_seconds()) if offset is not None else 0
 
@@ -302,7 +343,7 @@ def _build_sets(
 
         payload: dict[str, Any] = {
             "exercise_type": exercise_type,
-            "start_time": _format_iso_z(
+            "start_time": _format_iso_offset(
                 start_dt + timedelta(seconds=float(item["start_offset_s"]))
             ),
         }
@@ -497,13 +538,14 @@ def build_strength_payload(
         end = end.replace(tzinfo=timezone.utc)
 
     duration_s = max(1, int(round((end - start).total_seconds())))
-    sets = _build_sets(workout, start, duration_s, config)
+    strava_start = _strava_local_time(start, config)
+    sets = _build_sets(workout, strava_start, duration_s, config)
     if not sets:
         raise ValueError("no mapped strength sets to upload to Strava")
 
     payload: dict[str, Any] = {
         "version": "1.0",
-        "start_time": _format_iso_z(start),
+        "start_time": _format_iso_offset(strava_start),
         "utc_offset": _utc_offset_seconds(config, start),
         "elapsed_time": duration_s,
         "active_time": duration_s,

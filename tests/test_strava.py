@@ -74,13 +74,14 @@ def test_build_strength_payload_contains_sets_and_hr(sample_workout: dict) -> No
     )
 
     assert payload["version"] == "1.0"
-    assert payload["start_time"] == "2026-04-01T20:00:00Z"
+    assert payload["start_time"] == "2026-04-01T21:00:00+01:00"
+    assert payload["utc_offset"] == 3600
     assert payload["elapsed_time"] == 2700
     assert payload["total_calories"] == 321
     assert payload["streams"] == {"time": [0, 60, 2700], "heartrate": [80, 112, 112]}
     assert payload["sets"][0] == {
         "exercise_type": "BARBELL_BENCH_PRESS",
-        "start_time": "2026-04-01T20:00:00Z",
+        "start_time": "2026-04-01T21:00:00+01:00",
         "repetitions": 12,
         "weight": 40.0,
     }

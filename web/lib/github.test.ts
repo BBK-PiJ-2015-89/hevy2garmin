@@ -5,12 +5,12 @@ import { minutesToCron, formatIntervalLabel, buildSyncWorkflowYaml, sealSecret, 
 
 describe("cron + labels (parity with the Python dashboard)", () => {
   it("maps the dashboard's intervals", () => {
-    expect(minutesToCron(30)).toBe("*/30 * * * *");
-    expect(minutesToCron(60)).toBe("0 * * * *");
-    expect(minutesToCron(120)).toBe("0 */2 * * *");
-    expect(minutesToCron(240)).toBe("0 */4 * * *");
-    expect(minutesToCron(1440)).toBe("0 0 * * *");
-    expect(minutesToCron(45)).toBe("0 */2 * * *"); // unexpected → default
+    expect(minutesToCron(30)).toBe("13,43 * * * *");
+    expect(minutesToCron(60)).toBe("13 * * * *");
+    expect(minutesToCron(120)).toBe("13 */2 * * *");
+    expect(minutesToCron(240)).toBe("13 */4 * * *");
+    expect(minutesToCron(1440)).toBe("13 0 * * *");
+    expect(minutesToCron(45)).toBe("13 */2 * * *"); // unexpected → default
   });
   it("labels", () => {
     expect(formatIntervalLabel(30)).toBe("30 minutes");
