@@ -231,7 +231,7 @@ export default async function DashboardPage() {
       <header className="mb-6">
         <h1 className="text-2xl font-bold text-text">Sync status</h1>
         <p className="mt-1 text-sm text-text-secondary">
-          Your Hevy workouts flowing into Garmin Connect.
+          Your Hevy workouts flowing into Garmin Connect, with optional Strava visual strength copies.
         </p>
       </header>
 

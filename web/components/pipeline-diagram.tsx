@@ -7,8 +7,9 @@
  *
  * Content is faithful to the real pipeline and MUST stay accurate:
  *   Hevy (fetch) → Map exercises (N built-in mappings) → Generate FIT
- *   (+ HR + calories) → Garmin (upload). HR loop: Garmin's daily heart-rate is
- *   matched to the workout, its calories computed, and fed back into the FIT.
+ *   (+ HR + calories) → Garmin (upload). Optional branch: enriched workout
+ *   data → Strava visual strength JSON. HR loop: Garmin's daily heart-rate is
+ *   matched to the workout, its calories computed, and fed back into the outputs.
  */
 
 interface Stage {
@@ -39,14 +40,14 @@ export function PipelineDiagram({ mappingCount }: { mappingCount?: number }) {
           <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
         </svg>
         <h3 className="text-sm font-semibold text-text">Pipeline</h3>
-        <span className="text-xs text-text-muted">— how a workout reaches Garmin</span>
+        <span className="text-xs text-text-muted">— Garmin plus optional Strava visual</span>
       </div>
 
       <div className="overflow-x-auto">
         <svg
           viewBox="0 0 852 352"
           role="img"
-          aria-label="Hevy fetches the workout, exercises are mapped to Garmin FIT categories, a FIT file is generated with heart-rate and calories, and it is uploaded to Garmin. In a loop, Garmin's daily heart-rate is matched to the workout and its calories are computed, feeding back into the FIT."
+          aria-label="Hevy fetches the workout, exercises are mapped to Garmin FIT categories, outputs are generated with heart-rate and calories, and the main activity is uploaded to Garmin. Optionally, the same enriched workout data is uploaded to Strava as a visual strength activity. In a loop, Garmin's daily heart-rate is matched to the workout and its calories are computed, feeding back into the outputs."
           className="block h-auto w-full min-w-[600px]"
           style={{ fontFamily: "inherit" }}
         >
@@ -83,6 +84,7 @@ export function PipelineDiagram({ mappingCount }: { mappingCount?: number }) {
           <path id="pl-c1" d="M196,120 L224,120" fill="none" />
           <path id="pl-c2" d="M412,120 L440,120" fill="none" />
           <path id="pl-c3" d="M628,120 L656,120" fill="none" />
+          <path id="pl-s1" d="M534,168 C514,212 378,220 318,262" fill="none" />
           <path id="pl-h1" d="M750,168 C750,208 750,220 750,262" fill="none" />
           <path id="pl-h2" d="M656,300 C628,300 620,300 592,300" fill="none" />
           <path id="pl-h3" d="M534,262 C534,222 534,208 534,168" fill="none" />
@@ -93,6 +95,8 @@ export function PipelineDiagram({ mappingCount }: { mappingCount?: number }) {
             <g className="pl-teal"><use href="#pl-c1" className="pl-flow" stroke="currentColor" strokeWidth="2.5" strokeOpacity="0.8" /></g>
             <g className="pl-warm"><use href="#pl-c2" className="pl-flow" stroke="currentColor" strokeWidth="2.5" strokeOpacity="0.8" /></g>
             <g className="pl-success"><use href="#pl-c3" className="pl-flow" stroke="currentColor" strokeWidth="2.5" strokeOpacity="0.8" /></g>
+            <use href="#pl-s1" className="pl-cbase" strokeWidth="2.5" strokeDasharray="7 5" />
+            <g className="pl-warm"><use href="#pl-s1" className="pl-flow" stroke="currentColor" strokeWidth="2.5" strokeOpacity="0.8" /></g>
             <use href="#pl-h1" className="pl-cbase" strokeWidth="2.5" /><use href="#pl-h2" className="pl-cbase" strokeWidth="2.5" /><use href="#pl-h3" className="pl-cbase" strokeWidth="2.5" />
             <g className="pl-danger">
               <use href="#pl-h1" className="pl-flow" stroke="currentColor" strokeWidth="2.5" strokeOpacity="0.8" style={{ animationDuration: "0.95s" }} />
@@ -106,6 +110,7 @@ export function PipelineDiagram({ mappingCount }: { mappingCount?: number }) {
             <circle r="3" className="pl-teal" fill="currentColor"><animateMotion dur="1.6s" repeatCount="indefinite"><mpath href="#pl-c1" /></animateMotion></circle>
             <circle r="3" className="pl-warm" fill="currentColor"><animateMotion dur="1.6s" begin="0.5s" repeatCount="indefinite"><mpath href="#pl-c2" /></animateMotion></circle>
             <circle r="3" className="pl-success" fill="currentColor"><animateMotion dur="1.6s" begin="0.9s" repeatCount="indefinite"><mpath href="#pl-c3" /></animateMotion></circle>
+            <circle r="2.8" className="pl-warm" fill="currentColor"><animateMotion dur="2.2s" begin="0.2s" repeatCount="indefinite"><mpath href="#pl-s1" /></animateMotion></circle>
             <circle r="2.7" className="pl-danger" fill="currentColor"><animateMotion dur="2.6s" repeatCount="indefinite"><mpath href="#pl-h1" /></animateMotion></circle>
             <circle r="2.7" className="pl-danger" fill="currentColor"><animateMotion dur="2.6s" begin="0.9s" repeatCount="indefinite"><mpath href="#pl-h2" /></animateMotion></circle>
             <circle r="2.7" className="pl-danger" fill="currentColor"><animateMotion dur="3.2s" begin="1.4s" repeatCount="indefinite"><mpath href="#pl-h3" /></animateMotion></circle>
@@ -124,6 +129,15 @@ export function PipelineDiagram({ mappingCount }: { mappingCount?: number }) {
               </text>
             </g>
           ))}
+
+          {/* Optional Strava visual upload branch */}
+          <g className="pl-warm">
+            <rect x="224" y="262" width="188" height="76" rx="16" fill="currentColor" opacity="0.11" filter="url(#pl-soft)" />
+            <rect x="224" y="262" width="188" height="76" rx="16" className="pl-base" stroke="currentColor" strokeOpacity="0.5" strokeDasharray="7 4" />
+            <rect x="224" y="262" width="188" height="76" rx="16" fill="currentColor" opacity="0.06" />
+            <text x="318" y="296" textAnchor="middle" fontSize="14.5" fontWeight="700" fill="var(--color-warm-light)">Strava visual</text>
+            <text x="318" y="316" textAnchor="middle" fontSize="10.5" className="pl-sub">Optional exercise UI</text>
+          </g>
 
           {/* Fetch HR data (teal-light, dashed, under Garmin) */}
           <g className="pl-tealL">
@@ -150,6 +164,9 @@ export function PipelineDiagram({ mappingCount }: { mappingCount?: number }) {
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="inline-block h-2.5 w-2.5 rounded-full bg-danger" style={{ boxShadow: "0 0 10px var(--color-danger)" }} /> Heart-rate enrichment
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-block h-2.5 w-2.5 rounded-full bg-warm" style={{ boxShadow: "0 0 10px var(--color-warm)" }} /> Optional Strava visual
         </span>
         <span>
           Runs when HR fusion is on — toggle it in{" "}

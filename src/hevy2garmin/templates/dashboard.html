@@ -324,7 +324,7 @@
         <span class="card-title" style="margin: 0;">Pipeline</span>
     </div>
     <svg viewBox="0 0 800 240" style="width: 100%; height: auto;" xmlns="http://www.w3.org/2000/svg">
-        <!-- ═══ TOP ROW: Hevy → Map → FIT → Garmin ═══ -->
+        <!-- ═══ TOP ROW: Hevy → Map → FIT → Garmin, plus optional Strava visual copy ═══ -->
 
         <!-- 1. Hevy API — Hevy brand indigo/blue -->
         <rect x="10" y="15" width="155" height="62" rx="8" fill="rgba(99,102,241,0.1)" stroke="rgba(99,102,241,0.35)" stroke-width="1"/>
@@ -388,6 +388,13 @@
         <polygon points="464,86 470,77 476,86" fill="#f43f5e"/>
         <text x="480" y="108" fill="#f43f5e" font-size="9.5" font-weight="600" font-family="Inter,sans-serif">enriches</text>
 
+        <!-- Optional Strava visual upload branch -->
+        <path d="M512,82 C494,113 380,111 307,130" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="5,4"/>
+        <polygon points="311,124 300,132 313,136" fill="#f59e0b"/>
+        <rect x="220" y="130" width="155" height="55" rx="8" fill="rgba(245,158,11,0.06)" stroke="rgba(245,158,11,0.35)" stroke-width="1" stroke-dasharray="6,3"/>
+        <text x="297" y="153" text-anchor="middle" fill="#fbbf24" font-size="12" font-weight="700" font-family="Inter,sans-serif">Strava Visual</text>
+        <text x="297" y="168" text-anchor="middle" fill="#64748b" font-size="10" font-family="Inter,sans-serif">Exercise UI copy</text>
+
         <!-- Fallback -->
         <text x="575" y="207" text-anchor="middle" fill="#475569" font-size="9.5" font-style="italic" font-family="Inter,sans-serif">No watch HR? Falls back to default 90 bpm estimate</text>
 
@@ -398,11 +405,15 @@
         <line x1="530" y1="228" x2="560" y2="228" stroke="#f43f5e" stroke-width="1.5"/>
         <polygon points="556,224 564,228 556,232" fill="#f43f5e"/>
         <text x="570" y="232" fill="#f43f5e" font-size="9.5" font-family="Inter,sans-serif">HR enrichment</text>
+        <line x1="660" y1="228" x2="690" y2="228" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5,4"/>
+        <polygon points="686,224 694,228 686,232" fill="#f59e0b"/>
+        <text x="700" y="232" fill="#f59e0b" font-size="9.5" font-family="Inter,sans-serif">Strava visual</text>
     </svg>
 
     <!-- Explanation -->
     <div style="margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--border-subtle); font-size: 11px; color: var(--text-muted); line-height: 1.6;">
         <strong style="color: var(--text-secondary);">HR Fusion</strong> pulls your Garmin watch's daily heart rate monitoring and aligns it to each workout's time window, producing an HR timeline with color-coded exercise segments.
+        <strong style="color: var(--text-secondary);">Strava Visual</strong> is an optional second upload for Strava's exercise list and set breakdown.
         Cached locally after first load.
         <a href="/settings" style="font-size: 11px;">Configure &rarr;</a>
     </div>
