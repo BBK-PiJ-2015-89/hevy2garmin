@@ -1,4 +1,5 @@
 import postgres from "postgres";
+import { ensureSchema } from "./schema";
 
 /**
  * Tagged-template SQL function matching the @neondatabase/serverless shape
@@ -29,8 +30,11 @@ export function getDb(): SqlTag {
   }
   const client = postgres(url, { prepare: false });
 
+  // Every query waits for the one-time schema bootstrap (#475), so the first
+  // write on a fresh database cannot outrun the CREATE TABLE statements.
   const tag = ((strings: TemplateStringsArray, ...values: unknown[]) =>
-    (client as unknown as (s: TemplateStringsArray, ...v: unknown[]) => Promise<unknown[]>)(strings, ...values)
+    ensureSchema(client)
+      .then(() => (client as unknown as (s: TemplateStringsArray, ...v: unknown[]) => Promise<unknown[]>)(strings, ...values))
       .then((rows) => Array.from(rows) as Row[])) as SqlTag;
 
   tag.json = <T,>(value: T) => (client as unknown as { json: (v: T) => unknown }).json(value);
