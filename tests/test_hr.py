@@ -21,6 +21,7 @@ from hevy2garmin.hr import (
     fetch_watch_hr,
     hr_for_sync,
     load_hr_backup,
+    merge_hr_layers,
     merge_hr_sources,
     save_hr_backup,
 )
@@ -58,6 +59,19 @@ class TestMergeHRSources:
         )
         times = [s["time"] for s in merged]
         assert times == sorted(times)
+
+    def test_layered_sources_fill_gaps_by_priority(self):
+        hevy = [{"time": 0, "hr": 150}]
+        activity = [{"time": 0, "hr": 120}, {"time": 180, "hr": 130}]
+        daily = [{"time": 60, "hr": 100}, {"time": 180, "hr": 105}]
+
+        merged = merge_hr_layers(hevy, activity, daily)
+
+        assert merged == [
+            {"time": 0, "hr": 150},
+            {"time": 60, "hr": 100},
+            {"time": 180, "hr": 130},
+        ]
 
 
 # --- extract_hevy_hr --------------------------------------------------------
@@ -207,6 +221,29 @@ class TestFetchActivityHR:
 
         assert samples == [{"time": 60.0, "hr": 120}]
 
+    @patch("hevy2garmin.hr.fetch_activity_hr")
+    def test_activity_hr_gaps_are_filled_with_daily_watch_hr(self, fetch_activity):
+        fetch_activity.return_value = [{"time": 180, "hr": 130}]
+        client = MagicMock()
+        import datetime as dt
+        start_ms = int(dt.datetime.fromisoformat(self.WORKOUT["start_time"]).timestamp() * 1000)
+        client.get_heart_rates.return_value = {
+            "heartRateValues": [
+                [start_ms, 100],
+                [start_ms + 60_000, 105],
+                [start_ms + 540_000, 125],
+            ]
+        }
+
+        samples = build_workout_hr(client, self.WORKOUT, source_activity_id=123)
+
+        assert samples == [
+            {"time": 0.0, "hr": 100},
+            {"time": 60.0, "hr": 105},
+            {"time": 180, "hr": 130},
+            {"time": 540.0, "hr": 125},
+        ]
+
 
 # --- durable HR backup ------------------------------------------------------
 
@@ -280,6 +317,41 @@ class TestHRBackup:
         )
 
         assert result == [{"time": 0, "hr": 100}]
+        database.set_app_config.assert_called_once()
+
+    @patch("hevy2garmin.hr.fetch_activity_hr")
+    def test_hr_for_sync_fills_protected_activity_gaps_with_daily_hr(
+        self,
+        fetch_activity,
+    ):
+        fetch_activity.return_value = [{"time": 180, "hr": 130}]
+        database = MagicMock()
+        database.get_app_config.return_value = None
+        client = MagicMock()
+        import datetime as dt
+        start_ms = int(dt.datetime.fromisoformat(self.WORKOUT["start_time"]).timestamp() * 1000)
+        client.get_heart_rates.return_value = {
+            "heartRateValues": [
+                [start_ms, 100],
+                [start_ms + 60_000, 105],
+                [start_ms + 540_000, 125],
+            ]
+        }
+
+        result = hr_for_sync(
+            database,
+            client,
+            self.WORKOUT,
+            {"hr_fusion": {"enabled": True}},
+            source_activity_id=123,
+        )
+
+        assert result == [
+            {"time": 0.0, "hr": 100},
+            {"time": 60.0, "hr": 105},
+            {"time": 180, "hr": 130},
+            {"time": 540.0, "hr": 125},
+        ]
         database.set_app_config.assert_called_once()
 
     @patch("hevy2garmin.hr.fetch_activity_hr", return_value=[])

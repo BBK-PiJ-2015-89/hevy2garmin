@@ -249,6 +249,8 @@ def _exercise_type(exercise: dict[str, Any]) -> str | None:
     title = exercise.get("title") or exercise.get("name") or ""
     cat, sub, _ = lookup_exercise(title, exercise.get("exercise_template_id"))
     _, exercise_name = fit_exercise_strings(cat, sub)
+    if exercise_name and "LUNGE" in exercise_name:
+        return "LUNGE"
     return exercise_name
 
 
@@ -331,6 +333,12 @@ def _build_streams(hr_samples: list[Any] | None, duration_s: float) -> dict[str,
     times = sorted(points)
     if not times:
         return {}
+    duration_key = int(round(duration_s))
+    if times[0] > 0:
+        points[0] = points[times[0]]
+    if duration_key > 0 and times[-1] < duration_key:
+        points[duration_key] = points[times[-1]]
+    times = sorted(points)
     return {"time": times, "heartrate": [points[t] for t in times]}
 
 

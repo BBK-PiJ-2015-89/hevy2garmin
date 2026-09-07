@@ -409,6 +409,17 @@ def merge_hr_sources(
     return [chosen[k] for k in sorted(chosen)]
 
 
+def merge_hr_layers(
+    *sources: list[dict] | None,
+    bucket_s: float = 10.0,
+) -> list[dict]:
+    """Merge several HR series from highest to lowest priority."""
+    merged: list[dict] = []
+    for source in reversed(sources):
+        merged = merge_hr_sources(source, merged, bucket_s=bucket_s)
+    return merged
+
+
 def build_workout_hr(
     garmin_client,
     workout: dict,
@@ -418,8 +429,8 @@ def build_workout_hr(
     """Top-level helper: merged HR for a workout (Hevy-preferred, watch fill).
 
     When replacing a matched watch activity, prefer its high-resolution FIT HR.
-    Daily passive HR remains the best-effort fallback for ordinary uploads or
-    when Garmin does not make the original activity downloadable.
+    Daily passive HR also fills uncovered buckets so a partial activity stream
+    does not leave the start or end of the synced workout blank.
     """
     hevy_hr = extract_hevy_hr(workout)        # AirPods / in-workout (empty today)
     activity_hr = (
@@ -433,8 +444,13 @@ def build_workout_hr(
             len(activity_hr),
             source_activity_id,
         )
-    watch_hr = activity_hr or fetch_watch_hr(garmin_client, workout, limiter)
-    return merge_hr_sources(hevy_hr, watch_hr)
+    daily_hr = fetch_watch_hr(garmin_client, workout, limiter)
+    if activity_hr and daily_hr:
+        logger.info(
+            "  HR: filling activity HR gaps with %d passive watch samples",
+            len(daily_hr),
+        )
+    return merge_hr_layers(hevy_hr, activity_hr, daily_hr)
 
 
 def hr_for_sync(
@@ -454,6 +470,7 @@ def hr_for_sync(
     if not garmin_client or not config.get("hr_fusion", {}).get("enabled", True):
         return None
     try:
+        hevy_hr = extract_hevy_hr(workout)
         # A matched watch recording has much denser, activity-specific HR than
         # either the dashboard cache or daily monitoring, so always try it first.
         if source_activity_id is not None:
@@ -466,12 +483,19 @@ def hr_for_sync(
                     len(activity_hr),
                     source_activity_id,
                 )
-                return merge_hr_sources(extract_hevy_hr(workout), activity_hr) or None
+                daily_hr = fetch_watch_hr(garmin_client, workout, limiter)
+                if daily_hr:
+                    logger.info(
+                        "  HR: filling protected activity HR gaps with %d passive watch samples",
+                        len(daily_hr),
+                    )
+                return merge_hr_layers(hevy_hr, activity_hr, daily_hr) or None
 
         backup_hr = load_hr_backup(db, workout)
         if backup_hr:
             logger.info("  HR: restored %d samples from durable backup", len(backup_hr))
-            return merge_hr_sources(extract_hevy_hr(workout), backup_hr) or None
+            daily_hr = fetch_watch_hr(garmin_client, workout, limiter)
+            return merge_hr_layers(hevy_hr, backup_hr, daily_hr) or None
         if source_activity_id is not None:
             raise HRBackupError(
                 f"Garmin activity {source_activity_id} HR could not be extracted and no durable backup exists; source activity preserved"
@@ -480,7 +504,7 @@ def hr_for_sync(
         wid = workout.get("id")
         cached = db.get_cached_hr(wid) if wid else None
         if isinstance(cached, dict) and cached.get("hr_samples"):
-            return merge_hr_sources(extract_hevy_hr(workout), cached["hr_samples"]) or None
+            return merge_hr_layers(hevy_hr, cached["hr_samples"]) or None
         return build_workout_hr(garmin_client, workout, limiter) or None
     except HRBackupError:
         # A replacement must not proceed to deletion if the only high-resolution
