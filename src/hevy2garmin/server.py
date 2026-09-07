@@ -2616,21 +2616,17 @@ async def _setup_github_actions(interval_minutes: int = 120) -> tuple[bool, str]
         except Exception:
             pass
 
-        # Fire-and-forget initial sync trigger (don't block on it)
-        async def _trigger_initial_sync():
-            try:
-                await asyncio.to_thread(
-                    lambda: req.post(
-                        f"{base}/dispatches",
-                        headers=headers,
-                        json={"event_type": "sync-trigger"},
-                        timeout=10,
-                    )
+        try:
+            await asyncio.to_thread(
+                lambda: req.post(
+                    f"{base}/dispatches",
+                    headers=headers,
+                    json={"event_type": "sync-trigger"},
+                    timeout=10,
                 )
-            except Exception:
-                pass
-
-        asyncio.create_task(_trigger_initial_sync())
+            )
+        except Exception:
+            pass
 
         return True, f"Auto-sync enabled! Workouts will sync every {_format_interval_label(interval_minutes)}."
     except Exception as e:

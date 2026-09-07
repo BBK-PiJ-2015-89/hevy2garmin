@@ -156,7 +156,7 @@ export async function setupGithubActions(opts: { pat: string; repo: string; data
     ]);
     if (![200, 201, 204].includes(secret.status)) return { ok: false, message: `Failed to set DATABASE_URL secret: HTTP ${secret.status}` };
     await call("actions/workflows/sync.yml/enable", { method: "PUT" }).catch(() => undefined);
-    void call("dispatches", { method: "POST", body: JSON.stringify({ event_type: "sync-trigger" }) }).catch(() => undefined);
+    await call("dispatches", { method: "POST", body: JSON.stringify({ event_type: "sync-trigger" }) }).catch(() => undefined);
     return { ok: true, message: `Auto-sync enabled! Workouts will sync every ${formatIntervalLabel(interval)}.` };
   } catch (e) {
     return { ok: false, message: `Failed to set up auto-sync: ${(e as Error).message}` };
