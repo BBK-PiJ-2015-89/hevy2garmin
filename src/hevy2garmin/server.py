@@ -2902,7 +2902,9 @@ def _bearer_ok(request: Request, secret: str) -> bool:
 @app.get("/api/cron/sync")
 async def cron_sync(request: Request, merge_only: bool = Query(False)):
     """Vercel cron endpoint. Syncs 1 workout per invocation."""
+    import json
     from fastapi.responses import JSONResponse
+    from hevy2garmin.planned_strava import sync_planned_strava
 
     # Vercel sets CRON_SECRET to verify cron requests
     cron_secret = os.environ.get("CRON_SECRET")
@@ -2910,8 +2912,26 @@ async def cron_sync(request: Request, merge_only: bool = Query(False)):
         if not _bearer_ok(request, cron_secret):
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
+    try:
+        planned_strava = await run_in_threadpool(sync_planned_strava)
+    except Exception as exc:
+        planned_strava = {
+            "checked": 0,
+            "updated": 0,
+            "skipped": 0,
+            "errors": [str(exc)],
+        }
+
     # Cron/autosync — respect grace so watch activities can land first.
-    return await _sync_one_recorded(respect_grace=True, merge_only=merge_only, trigger="cron")
+    response = await _sync_one_recorded(respect_grace=True, merge_only=merge_only, trigger="cron")
+    try:
+        payload = json.loads(response.body.decode("utf-8"))
+    except Exception:
+        payload = {}
+    if isinstance(payload, dict):
+        payload["plannedStrava"] = planned_strava
+        return JSONResponse(payload, status_code=response.status_code)
+    return response
 
 
 # ── Hevy webhook receiver ────────────────────────────────────────────────────
@@ -3065,3 +3085,4 @@ def run_server(host: str = "0.0.0.0", port: int = 8000) -> None:
     )
     logger.info("Starting hevy2garmin dashboard at http://localhost:%d", port)
     uvicorn.run(app, host=host, port=port, log_level="warning")
+
