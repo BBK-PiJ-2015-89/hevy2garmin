@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 
 /**
  * GET /api/cron/sync  —  the scheduled-trigger entry (Vercel cron / any
- * scheduler). Requires `Authorization: Bearer <CRON_SECRET>`. Then, like the
+ * scheduler). Requires `Authorization: Bearer <H2G_SECRET>`. Then, like the
  * live path of POST /api/sync, it hands off to the GitHub Action when
  * GITHUB_PAT + GITHUB_REPO are set (the deployed path, off the request), or
  * loops the tested single-workout engine up to a cap. Mirrors the Python
@@ -20,7 +20,7 @@ const CAP = 50;
 
 
 export async function GET(request: Request) {
-  const secret = process.env.CRON_SECRET;
+  const secret = process.env.H2G_SECRET;
   const auth = request.headers.get("authorization") ?? "";
   const m = auth.match(/^Bearer\s+(.+)$/i);
   if (!secret || !m || m[1] !== secret) {
