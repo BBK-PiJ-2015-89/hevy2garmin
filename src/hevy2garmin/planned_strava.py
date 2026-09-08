@@ -252,10 +252,37 @@ def _update_strava_activity(token: str, activity_id: int, plan: dict[str, Any]) 
         raise RuntimeError(f"Strava activity update failed ({response.status_code})")
 
 
+def _activity_sample(activity: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "activityId": activity.get("activityId"),
+        "name": _activity_name(activity),
+        "workoutId": activity.get("workoutId"),
+        "workoutName": activity.get("workoutName"),
+        "sport": _activity_sport(activity),
+        "start": _activity_start(activity),
+    }
+
+
 def sync_planned_strava() -> dict[str, Any]:
-    result: dict[str, Any] = {"checked": 0, "updated": 0, "skipped": 0, "errors": [], "reasons": {}}
+    result: dict[str, Any] = {
+        "checked": 0,
+        "updated": 0,
+        "skipped": 0,
+        "errors": [],
+        "reasons": {},
+        "diagnostics": {"plans": [], "garmin": []},
+    }
     store = db.get_db()
     plans = _load_plans(store)
+    result["diagnostics"]["plans"] = [
+        {
+            "date": plan.get("scheduledDate"),
+            "title": plan.get("workoutTitle"),
+            "session": plan.get("sessionTitle"),
+            "workoutId": plan.get("garminWorkoutId"),
+        }
+        for plan in plans[:12]
+    ]
     if not plans:
         return result
 
@@ -289,6 +316,14 @@ def sync_planned_strava() -> dict[str, Any]:
         result["checked"] += 1
         try:
             activities = garmin_client.get_activities_by_date(date_text, date_text) or []
+            if len(result["diagnostics"].get("garmin", [])) < 12:
+                for activity in activities:
+                    if _is_run(activity):
+                        result["diagnostics"]["garmin"].append(
+                            {"plannedDate": date_text, **_activity_sample(activity)}
+                        )
+                        if len(result["diagnostics"]["garmin"]) >= 12:
+                            break
             garmin_matches = [activity for activity in activities if _matches_plan(activity, plan)]
             if len(garmin_matches) != 1:
                 skip("garmin_match_not_unique" if garmin_matches else "garmin_match_missing")
