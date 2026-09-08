@@ -133,10 +133,10 @@ def _format_target(step: dict[str, Any]) -> str:
 
 
 def planned_description(plan: dict[str, Any]) -> str:
-    title = str(plan.get("workoutTitle") or "Planned workout")
-    lines = [title, "", "Structured planned workout"]
-    if plan.get("description"):
-        lines.extend(["", str(plan["description"])])
+    description = str(plan.get("description") or "").strip()
+    lines = ["Structured planned workout"]
+    if description and description.lower() != "custom planned workout":
+        lines.extend(["", description])
     steps = plan.get("steps") if isinstance(plan.get("steps"), list) else []
     if steps:
         lines.append("")
@@ -149,7 +149,7 @@ def planned_description(plan: dict[str, Any]) -> str:
                 continue
             name = step.get("name") or f"Step {index + 1}"
             lines.append(f"{name}: {_format_duration(step)}{_format_target(step)}")
-    lines.extend(["", "Synced from Garmin planned workout."])
+    lines.extend(["", "Synced by G’s ChatGPT Garmin ↔ Strava integration."])
     return "\n".join(lines)
 
 
