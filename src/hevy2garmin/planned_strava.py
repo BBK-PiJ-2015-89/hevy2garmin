@@ -74,9 +74,21 @@ def _matches_plan(activity: dict[str, Any], plan: dict[str, Any]) -> bool:
     workout_id = _workout_id(activity)
     if workout_id and workout_id == str(plan.get("garminWorkoutId") or ""):
         return True
-    name = _activity_name(activity).lower()
+    names = " ".join(
+        str(activity.get(key) or "")
+        for key in ("activityName", "name", "workoutName", "description")
+    ).lower()
     title = str(plan.get("workoutTitle") or "").lower()
-    return bool(name and title and (name == title or title in name))
+    session = str(plan.get("sessionTitle") or "").lower()
+    plan_name = str(plan.get("planName") or "").lower()
+    return bool(
+        names
+        and (
+            (title and (title in names or names in title))
+            or (session and session in names)
+            or (plan_name and plan_name in names and session and any(part in names for part in session.split()))
+        )
+    )
 
 
 def _format_duration(step: dict[str, Any]) -> str:
@@ -241,16 +253,22 @@ def _update_strava_activity(token: str, activity_id: int, plan: dict[str, Any]) 
 
 
 def sync_planned_strava() -> dict[str, Any]:
-    result: dict[str, Any] = {"checked": 0, "updated": 0, "skipped": 0, "errors": []}
+    result: dict[str, Any] = {"checked": 0, "updated": 0, "skipped": 0, "errors": [], "reasons": {}}
     store = db.get_db()
     plans = _load_plans(store)
     if not plans:
         return result
 
+    def skip(reason: str) -> None:
+        result["skipped"] += 1
+        reasons = result.setdefault("reasons", {})
+        reasons[reason] = int(reasons.get(reason, 0)) + 1
+
     updated = _as_dict(store.get_app_config("planned_strava_updates"))
     creds = _strava_credentials(store)
     if not creds:
         result["skipped"] = len(plans)
+        result["reasons"] = {"strava_credentials_missing": len(plans)}
         result["errors"].append("Strava credentials not configured")
         return result
 
@@ -266,18 +284,18 @@ def sync_planned_strava() -> dict[str, Any]:
         workout_id = str(plan.get("garminWorkoutId") or "")
         date_text = str(plan.get("scheduledDate") or "")
         if not date_text or updated.get(workout_id):
-            result["skipped"] += 1
+            skip("already_updated_or_no_date")
             continue
         result["checked"] += 1
         try:
             activities = garmin_client.get_activities_by_date(date_text, date_text) or []
             garmin_matches = [activity for activity in activities if _matches_plan(activity, plan)]
             if len(garmin_matches) != 1:
-                result["skipped"] += 1
+                skip("garmin_match_not_unique" if garmin_matches else "garmin_match_missing")
                 continue
             strava = _matching_strava_activity(_strava_activities(token, date_text), garmin_matches[0])
             if not strava:
-                result["skipped"] += 1
+                skip("strava_match_missing_or_ambiguous")
                 continue
             _update_strava_activity(token, int(strava["id"]), plan)
             updated[workout_id] = {
@@ -291,3 +309,5 @@ def sync_planned_strava() -> dict[str, Any]:
         except Exception as exc:
             result["errors"].append(f"{plan.get('workoutTitle', 'Planned workout')}: {exc}")
     return result
+
+
