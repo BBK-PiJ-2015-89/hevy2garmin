@@ -86,7 +86,7 @@ def _matches_plan(activity: dict[str, Any], plan: dict[str, Any]) -> bool:
         and (
             (title and (title in names or names in title))
             or (session and session in names)
-            or (plan_name and plan_name in names and session and any(part in names for part in session.split()))
+            or (plan_name and plan_name in names)
         )
     )
 
@@ -344,6 +344,7 @@ def sync_planned_strava() -> dict[str, Any]:
         except Exception as exc:
             result["errors"].append(f"{plan.get('workoutTitle', 'Planned workout')}: {exc}")
     return result
+
 
 
 
