@@ -134,7 +134,7 @@ def _format_target(step: dict[str, Any]) -> str:
 
 def planned_description(plan: dict[str, Any]) -> str:
     description = str(plan.get("description") or "").strip()
-    lines = ["Structured planned workout"]
+    lines = ["🏃 Structured workout by G’s ChatGPT Training Sync 🏃"]
     if description and description.lower() != "custom planned workout":
         lines.extend(["", description])
     steps = plan.get("steps") if isinstance(plan.get("steps"), list) else []
@@ -149,7 +149,6 @@ def planned_description(plan: dict[str, Any]) -> str:
                 continue
             name = step.get("name") or f"Step {index + 1}"
             lines.append(f"{name}: {_format_duration(step)}{_format_target(step)}")
-    lines.extend(["", "🏃 Structured by G’s ChatGPT training sync"])
     return "\n".join(lines)
 
 
