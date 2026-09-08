@@ -184,7 +184,7 @@ def _refresh_strava_token(store: Any, creds: dict[str, str]) -> str:
             "refresh_token": creds["refresh_token"],
             "grant_type": "refresh_token",
         },
-        timeout=20,
+        timeout=10,
     )
     if response.status_code >= 400:
         raise RuntimeError(f"Strava token refresh failed ({response.status_code})")
@@ -222,7 +222,7 @@ def _strava_activities(token: str, date_text: str) -> list[dict[str, Any]]:
         f"{STRAVA_API}/athlete/activities",
         params={"after": after, "before": before, "per_page": 50},
         headers={"Authorization": f"Bearer {token}"},
-        timeout=20,
+        timeout=10,
     )
     if response.status_code >= 400:
         raise RuntimeError(f"Strava activity list failed ({response.status_code})")
@@ -252,7 +252,7 @@ def _update_strava_activity(token: str, activity_id: int, plan: dict[str, Any]) 
         f"{STRAVA_API}/activities/{activity_id}",
         json={"name": plan["workoutTitle"], "description": planned_description(plan)},
         headers={"Authorization": f"Bearer {token}"},
-        timeout=20,
+        timeout=10,
     )
     if response.status_code >= 400:
         raise RuntimeError(f"Strava activity update failed ({response.status_code})")
@@ -280,6 +280,14 @@ def sync_planned_strava() -> dict[str, Any]:
     }
     store = db.get_db()
     plans = _load_plans(store)
+    today = datetime.now(timezone.utc).date()
+    plans = [
+        plan
+        for plan in plans
+        if plan.get("scheduledDate")
+        and datetime.fromisoformat(str(plan["scheduledDate"])).date()
+        <= today
+    ]
     result["diagnostics"]["plans"] = [
         {
             "date": plan.get("scheduledDate"),
@@ -354,6 +362,7 @@ def sync_planned_strava() -> dict[str, Any]:
         except Exception as exc:
             result["errors"].append(f"{plan.get('workoutTitle', 'Planned workout')}: {exc}")
     return result
+
 
 
 
