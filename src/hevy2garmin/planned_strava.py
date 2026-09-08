@@ -331,6 +331,10 @@ def sync_planned_strava() -> dict[str, Any]:
                         if len(result["diagnostics"]["garmin"]) >= 12:
                             break
             garmin_matches = [activity for activity in activities if _matches_plan(activity, plan)]
+            if not garmin_matches:
+                same_day_runs = [activity for activity in activities if _is_run(activity)]
+                if len(same_day_runs) == 1:
+                    garmin_matches = same_day_runs
             if len(garmin_matches) != 1:
                 skip("garmin_match_not_unique" if garmin_matches else "garmin_match_missing")
                 continue
