@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -68,6 +69,18 @@ def _is_run(activity: dict[str, Any]) -> bool:
     return not sport or "running" in sport or sport == "run"
 
 
+def _normalise_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _matches_text(haystack: str, needle: str) -> bool:
+    haystack = _normalise_text(haystack)
+    needle = _normalise_text(needle)
+    if not haystack or not needle:
+        return False
+    return needle in haystack or haystack in needle
+
+
 def _matches_plan(activity: dict[str, Any], plan: dict[str, Any]) -> bool:
     if not _is_run(activity):
         return False
@@ -77,17 +90,10 @@ def _matches_plan(activity: dict[str, Any], plan: dict[str, Any]) -> bool:
     names = " ".join(
         str(activity.get(key) or "")
         for key in ("activityName", "name", "workoutName", "description")
-    ).lower()
-    title = str(plan.get("workoutTitle") or "").lower()
-    session = str(plan.get("sessionTitle") or "").lower()
-    plan_name = str(plan.get("planName") or "").lower()
-    return bool(
-        names
-        and (
-            (title and (title in names or names in title))
-            or (session and session in names)
-            or (plan_name and plan_name in names)
-        )
+    )
+    return any(
+        _matches_text(names, str(plan.get(key) or ""))
+        for key in ("workoutTitle", "sessionTitle", "planName")
     )
 
 
