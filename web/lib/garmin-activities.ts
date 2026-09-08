@@ -13,10 +13,15 @@ import { getGarminClient } from "./garmin-upload";
 
 export interface GarminActivity {
   activityId?: number;
+  activityName?: string;
+  name?: string;
   startTimeGMT?: string;
   startTimeLocal?: string;
   duration?: number;
   manufacturer?: string;
+  workoutId?: number | string;
+  workoutName?: string;
+  activityType?: { typeKey?: string };
 }
 
 /** Garmin activities on a given YYYY-MM-DD (activitylist-service search). */

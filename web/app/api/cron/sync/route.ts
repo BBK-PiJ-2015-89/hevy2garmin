@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { syncOneWorkout, type SyncOneResult } from "@/lib/sync-one";
 import { getDb } from "@/lib/db";
 import { getGithubPat, getGithubRepo, triggerViaActions } from "@/lib/github";
+import { syncPlannedStrava } from "@/lib/planned-strava";
 
 // Runs the sync at request time — never at build.
 export const dynamic = "force-dynamic";
@@ -27,6 +28,19 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
   }
 
+  let plannedStrava = null;
+  try {
+    const sql = getDb();
+    plannedStrava = await syncPlannedStrava(sql);
+  } catch (err) {
+    plannedStrava = {
+      checked: 0,
+      updated: 0,
+      skipped: 0,
+      errors: [err instanceof Error ? err.message : String(err)],
+    };
+  }
+
   // Deployed path: hand off to the Action so the long browser-auth sync runs off
   // the request.
   // Settings row first, GITHUB_PAT fallback (#458). The DB handle may be unavailable here; env still works.
@@ -37,10 +51,10 @@ export async function GET(request: Request) {
   if (pat && repo) {
     try {
       const ok = await triggerViaActions(pat, repo);
-      return NextResponse.json({ ok, mode: "dispatch", triggered: ok }, { status: ok ? 200 : 502 });
+      return NextResponse.json({ ok, mode: "dispatch", triggered: ok, plannedStrava }, { status: ok ? 200 : 502 });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
-      return NextResponse.json({ ok: false, error }, { status: 502 });
+      return NextResponse.json({ ok: false, error, plannedStrava }, { status: 502 });
     }
   }
 
@@ -67,5 +81,5 @@ export async function GET(request: Request) {
   }
 
   const synced = runs.filter((r) => r.status === "synced").length;
-  return NextResponse.json({ ok: true, mode: "inline", ran: runs.length, synced });
+  return NextResponse.json({ ok: true, mode: "inline", ran: runs.length, synced, plannedStrava });
 }
