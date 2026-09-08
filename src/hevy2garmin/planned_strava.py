@@ -149,7 +149,7 @@ def planned_description(plan: dict[str, Any]) -> str:
                 continue
             name = step.get("name") or f"Step {index + 1}"
             lines.append(f"{name}: {_format_duration(step)}{_format_target(step)}")
-    lines.extend(["", "Synced by G’s ChatGPT Garmin ↔ Strava integration."])
+    lines.extend(["", "🏃 Structured by G’s ChatGPT training sync"])
     return "\n".join(lines)
 
 
