@@ -678,6 +678,109 @@ def _delete_activity(
     resp.raise_for_status()
 
 
+def _strava_activity_start(activity: dict[str, Any]) -> datetime | None:
+    start = _parse_timestamp(
+        str(activity.get("start_date") or activity.get("start_date_local") or "")
+    )
+    if start is None:
+        return None
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    return start.astimezone(timezone.utc)
+
+
+def _find_existing_strava_activity(
+    token: str,
+    workout: dict[str, Any],
+    *,
+    session: Any = requests,
+) -> int | None:
+    start = _parse_timestamp(workout.get("start_time") or workout.get("startTime"))
+    end = _parse_timestamp(workout.get("end_time") or workout.get("endTime"))
+    if start is None:
+        return None
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    start = start.astimezone(timezone.utc)
+    if end is None:
+        end = start + timedelta(hours=3)
+    elif end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    end = end.astimezone(timezone.utc)
+
+    resp = session.get(
+        f"{_api_base()}/athlete/activities",
+        params={
+            "after": int((start - timedelta(hours=2)).timestamp()),
+            "before": int((end + timedelta(hours=2)).timestamp()),
+            "per_page": 50,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    if not isinstance(payload, list):
+        return None
+
+    title = str(workout.get("title") or "").strip().lower()
+    candidates: list[dict[str, Any]] = []
+    for activity in payload:
+        if not isinstance(activity, dict):
+            continue
+        sport = str(activity.get("sport_type") or activity.get("type") or "").lower()
+        if sport and not any(word in sport for word in ("weight", "strength", "workout")):
+            continue
+        activity_start = _strava_activity_start(activity)
+        if activity_start and abs((activity_start - start).total_seconds()) <= 45 * 60:
+            candidates.append(activity)
+
+    if not candidates:
+        return None
+    named = [
+        activity
+        for activity in candidates
+        if title
+        and (
+            title in str(activity.get("name") or "").lower()
+            or str(activity.get("name") or "").lower() in title
+        )
+    ]
+    if len(named) == 1:
+        return int(named[0]["id"])
+    if len(candidates) == 1:
+        return int(candidates[0]["id"])
+    return None
+
+
+def _update_matching_existing_activity(
+    token: str,
+    workout: dict[str, Any],
+    *,
+    name: str,
+    description: str,
+    session: Any = requests,
+) -> StravaUploadResult | None:
+    activity_id = _find_existing_strava_activity(token, workout, session=session)
+    if activity_id is None:
+        return None
+    _update_activity_metadata(
+        token,
+        activity_id,
+        name=name,
+        description=description,
+        session=session,
+    )
+    return StravaUploadResult(
+        status="updated",
+        activity_id=activity_id,
+        error=(
+            "Structured Strava upload failed, so the matching existing Strava "
+            "activity title and description were refreshed instead."
+        ),
+    )
+
+
 def _poll_upload(
     token: str,
     upload_id: str,
@@ -844,8 +947,8 @@ def try_upload_visual_strength(
             )
         else:
             logger.warning("Strava visual upload failed: %s", result.error)
-            if replaced_activity_id is not None:
-                try:
+            try:
+                if replaced_activity_id is not None:
                     _update_activity_metadata(
                         token,
                         replaced_activity_id,
@@ -863,40 +966,62 @@ def try_upload_visual_strength(
                         "Strava visual upload fallback: updated activity %s metadata",
                         replaced_activity_id,
                     )
-                except Exception as exc:
-                    logger.warning(
-                        "Strava visual upload fallback failed for activity %s: %s",
-                        replaced_activity_id,
-                        exc,
+                else:
+                    fallback = _update_matching_existing_activity(
+                        token,
+                        workout,
+                        name=title,
+                        description=description,
+                        session=session,
                     )
+                    if fallback is not None:
+                        _mark_uploaded(store, hevy_id, fallback, external_id)
+                        result = fallback
+                        logger.info(
+                            "Strava visual upload fallback: updated matching activity %s metadata",
+                            fallback.activity_id,
+                        )
+            except Exception as exc:
+                logger.warning("Strava visual upload fallback failed: %s", exc)
         return result
     except Exception as exc:
         logger.warning("Strava visual upload failed: %s", exc)
-        if replaced_activity_id is not None and token:
+        if token:
             try:
-                _update_activity_metadata(
+                if replaced_activity_id is not None:
+                    _update_activity_metadata(
+                        token,
+                        replaced_activity_id,
+                        name=title,
+                        description=description,
+                        session=session,
+                    )
+                    logger.info(
+                        "Strava visual upload fallback: updated activity %s metadata after upload exception",
+                        replaced_activity_id,
+                    )
+                    return StravaUploadResult(
+                        status="updated",
+                        activity_id=replaced_activity_id,
+                        error=(
+                            "Structured Strava re-upload failed, so the existing "
+                            "Strava activity title and description were refreshed instead."
+                        ),
+                    )
+                fallback = _update_matching_existing_activity(
                     token,
-                    replaced_activity_id,
+                    workout,
                     name=title,
                     description=description,
                     session=session,
                 )
-                logger.info(
-                    "Strava visual upload fallback: updated activity %s metadata after upload exception",
-                    replaced_activity_id,
-                )
-                return StravaUploadResult(
-                    status="updated",
-                    activity_id=replaced_activity_id,
-                    error=(
-                        "Structured Strava re-upload failed, so the existing "
-                        "Strava activity title and description were refreshed instead."
-                    ),
-                )
+                if fallback is not None:
+                    _mark_uploaded(store, hevy_id, fallback, _external_id(workout))
+                    logger.info(
+                        "Strava visual upload fallback: updated matching activity %s metadata",
+                        fallback.activity_id,
+                    )
+                    return fallback
             except Exception as fallback_exc:
-                logger.warning(
-                    "Strava visual upload fallback failed for activity %s: %s",
-                    replaced_activity_id,
-                    fallback_exc,
-                )
+                logger.warning("Strava visual upload fallback failed: %s", fallback_exc)
         return StravaUploadResult(status="failed", error=str(exc))

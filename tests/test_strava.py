@@ -257,6 +257,79 @@ def test_update_existing_visual_activity_updates_description(sample_workout: dic
     session.get.assert_not_called()
 
 
+def test_new_visual_upload_falls_back_to_matching_strava_activity(
+    sample_workout: dict,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("STRAVA_BASE_URL", "https://strava.test")
+    monkeypatch.setenv("STRAVA_API_BASE_URL", "https://strava.test/api/v3")
+    store = _Store()
+    session = MagicMock()
+    session.post.side_effect = [
+        _Resp({"access_token": "access"}),
+        _Resp({"message": "Error Processing Data"}, RuntimeError("Error Processing Data")),
+    ]
+    session.get.return_value = _Resp([
+        {
+            "id": 456,
+            "name": "Full Body 1",
+            "sport_type": "WeightTraining",
+            "start_date": "2026-04-01T20:00:00Z",
+        }
+    ])
+    session.put.return_value = _Resp({})
+
+    result = try_upload_visual_strength(
+        sample_workout,
+        config=_config(),
+        store=store,
+        session=session,
+    )
+
+    assert result.status == "updated"
+    assert result.activity_id == 456
+    session.put.assert_called_once()
+    assert store.values["strava_visual_upload_test-workout-123"]["activity_id"] == 456
+
+
+def test_failed_strava_processing_falls_back_to_matching_activity(
+    sample_workout: dict,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("STRAVA_BASE_URL", "https://strava.test")
+    monkeypatch.setenv("STRAVA_API_BASE_URL", "https://strava.test/api/v3")
+    store = _Store()
+    session = MagicMock()
+    session.post.side_effect = [
+        _Resp({"access_token": "access"}),
+        _Resp({"id": 123, "id_str": "123", "status": "success"}),
+    ]
+    session.get.side_effect = [
+        _Resp({"id": 123, "id_str": "123", "error": "Error Processing Data"}),
+        _Resp([
+            {
+                "id": 456,
+                "name": "Push",
+                "sport_type": "WeightTraining",
+                "start_date": "2026-04-01T20:00:00Z",
+            }
+        ]),
+    ]
+    session.put.return_value = _Resp({})
+
+    result = try_upload_visual_strength(
+        sample_workout,
+        config=_config(),
+        store=store,
+        session=session,
+    )
+
+    assert result.status == "updated"
+    assert result.activity_id == 456
+    session.put.assert_called_once()
+    assert store.values["strava_visual_upload_test-workout-123"]["activity_id"] == 456
+
+
 def test_replace_existing_falls_back_to_metadata_update_when_upload_is_rejected(
     sample_workout: dict,
     monkeypatch,
