@@ -756,15 +756,17 @@ def try_upload_visual_strength(
         )
         return StravaUploadResult(status="failed", error="missing credentials")
 
+    title = str(workout.get("title") or "Strength Training")
+    description = generate_strava_description(
+        workout,
+        calories=calories,
+        avg_hr=avg_hr,
+    )
+    token = ""
+    replaced_activity_id = None
+
     try:
-        title = str(workout.get("title") or "Strength Training")
-        description = generate_strava_description(
-            workout,
-            calories=calories,
-            avg_hr=avg_hr,
-        )
         token = refresh_access_token(creds, session=session)
-        replaced_activity_id = None
         if existing_state and existing_state.get("activity_id") and replace_existing:
             replaced_activity_id = int(existing_state["activity_id"])
         elif existing_state and existing_state.get("activity_id") and update_existing:
@@ -870,4 +872,31 @@ def try_upload_visual_strength(
         return result
     except Exception as exc:
         logger.warning("Strava visual upload failed: %s", exc)
+        if replaced_activity_id is not None and token:
+            try:
+                _update_activity_metadata(
+                    token,
+                    replaced_activity_id,
+                    name=title,
+                    description=description,
+                    session=session,
+                )
+                logger.info(
+                    "Strava visual upload fallback: updated activity %s metadata after upload exception",
+                    replaced_activity_id,
+                )
+                return StravaUploadResult(
+                    status="updated",
+                    activity_id=replaced_activity_id,
+                    error=(
+                        "Structured Strava re-upload failed, so the existing "
+                        "Strava activity title and description were refreshed instead."
+                    ),
+                )
+            except Exception as fallback_exc:
+                logger.warning(
+                    "Strava visual upload fallback failed for activity %s: %s",
+                    replaced_activity_id,
+                    fallback_exc,
+                )
         return StravaUploadResult(status="failed", error=str(exc))

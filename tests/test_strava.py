@@ -257,6 +257,38 @@ def test_update_existing_visual_activity_updates_description(sample_workout: dic
     session.get.assert_not_called()
 
 
+def test_replace_existing_falls_back_to_metadata_update_when_upload_is_rejected(
+    sample_workout: dict,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("STRAVA_BASE_URL", "https://strava.test")
+    monkeypatch.setenv("STRAVA_API_BASE_URL", "https://strava.test/api/v3")
+    store = _Store()
+    store.set_app_config(
+        "strava_visual_upload_test-workout-123",
+        {"activity_id": 999, "external_id": "old.json"},
+    )
+    session = MagicMock()
+    session.post.side_effect = [
+        _Resp({"access_token": "access"}),
+        _Resp({"message": "Error Processing Data"}, RuntimeError("Error Processing Data")),
+    ]
+    session.put.return_value = _Resp({})
+
+    result = try_upload_visual_strength(
+        sample_workout,
+        config=_config(),
+        store=store,
+        replace_existing=True,
+        session=session,
+    )
+
+    assert result.status == "updated"
+    assert result.activity_id == 999
+    session.put.assert_called_once()
+    assert session.put.call_args.args[0] == "https://strava.test/api/v3/activities/999"
+    assert "Bench Press (Barbell)" in session.put.call_args.kwargs["json"]["description"]
+
 def test_replace_existing_visual_activity_deletes_and_reuploads(
     sample_workout: dict,
     monkeypatch,
