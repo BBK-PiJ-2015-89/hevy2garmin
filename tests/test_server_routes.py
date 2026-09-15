@@ -684,7 +684,7 @@ class TestStravaVisualWorkout:
              patch("hevy2garmin.strava.try_upload_visual_strength", fake_upload):
             r = client.post(
                 "/api/workout/test-workout-123/strava-visual",
-                data={"replace": "true", "force_new": "true"},
+                data={"update": "true"},
             )
 
         assert r.status_code == 200
@@ -696,8 +696,9 @@ class TestStravaVisualWorkout:
         assert upload["hr_samples"] == [{"time": 0, "hr": 99}]
         assert upload["calories"] == 123
         assert upload["avg_hr"] == 99
-        assert upload["replace_existing"] is True
-        assert upload["force_new_external_id"] is True
+        assert upload["update_existing"] is True
+        assert upload["replace_existing"] is False
+        assert upload["force_new_external_id"] is False
 
 
 class TestMappingsPage:

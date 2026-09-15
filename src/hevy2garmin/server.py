@@ -2176,6 +2176,7 @@ async def api_strava_visual_workout(request: Request, hevy_id: str):
 
         form = await request.form()
         replace_existing = form.get("replace") in ("true", "1", True)
+        update_existing = form.get("update") in ("true", "1", True)
         force_new_external_id = form.get("force_new") in ("true", "1", True)
         store = db.get_db()
         workout = HevyClient(api_key=config.get("hevy_api_key")).get_workout(hevy_id)
@@ -2191,6 +2192,7 @@ async def api_strava_visual_workout(request: Request, hevy_id: str):
             hr_samples=hr_samples,
             calories=fit_stats.get("calories"),
             avg_hr=fit_stats.get("avg_hr"),
+            update_existing=update_existing,
             replace_existing=replace_existing,
             force_new_external_id=force_new_external_id,
         )

@@ -526,9 +526,10 @@ async function loadHRChart(hevyId, summaryEl) {
 
 async function postStravaVisual(hevyId, replaceExisting) {
     const form = new FormData();
-    form.append('force_new', 'true');
     if (replaceExisting) {
-        form.append('replace', 'true');
+        form.append('update', 'true');
+    } else {
+        form.append('force_new', 'true');
     }
     const resp = await fetch(window.APP_PREFIX + '/api/workout/' + encodeURIComponent(hevyId) + '/strava-visual', { method: 'POST', body: form });
     const data = await resp.json();
@@ -537,7 +538,7 @@ async function postStravaVisual(hevyId, replaceExisting) {
 }
 
 async function stravaVisualWorkout(hevyId, replaceExisting, btn) {
-    if (replaceExisting && !confirm('Replace the visual Strava strength copy with the latest Hevy details?')) return;
+    if (replaceExisting && !confirm('Refresh the existing Strava activity title and description with the latest Hevy details?')) return;
     const original = btn.textContent.trim();
     btn.disabled = true;
     btn.textContent = replaceExisting ? 'Refreshing…' : 'Sending…';
