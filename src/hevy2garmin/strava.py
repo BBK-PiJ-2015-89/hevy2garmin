@@ -842,6 +842,31 @@ def try_upload_visual_strength(
             )
         else:
             logger.warning("Strava visual upload failed: %s", result.error)
+            if replaced_activity_id is not None:
+                try:
+                    _update_activity_metadata(
+                        token,
+                        replaced_activity_id,
+                        name=title,
+                        description=description,
+                        session=session,
+                    )
+                    result.status = "updated"
+                    result.activity_id = replaced_activity_id
+                    result.error = (
+                        "Structured Strava re-upload failed, so the existing "
+                        "Strava activity title and description were refreshed instead."
+                    )
+                    logger.info(
+                        "Strava visual upload fallback: updated activity %s metadata",
+                        replaced_activity_id,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Strava visual upload fallback failed for activity %s: %s",
+                        replaced_activity_id,
+                        exc,
+                    )
         return result
     except Exception as exc:
         logger.warning("Strava visual upload failed: %s", exc)
