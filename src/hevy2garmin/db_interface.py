@@ -94,6 +94,10 @@ class Database(ABC):
         """Store a JSON value in the generic key-value app cache."""
 
     @abstractmethod
+    def delete_app_config(self, key: str) -> None:
+        """Delete a JSON value from the generic key-value app cache."""
+
+    @abstractmethod
     def claim_pending(self, hevy_id: str, payload: dict[str, Any]) -> bool:
         """Atomically claim submission authority for a workout."""
 

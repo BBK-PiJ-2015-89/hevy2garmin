@@ -2065,8 +2065,10 @@ async def api_unsync(request: Request, hevy_id: str):
         except Exception as e:
             logger.warning("Failed to delete Garmin activity %s: %s", garmin_id, e)
 
-    # Clear cached workout pages so the workouts page reflects the change
+    # Clear cached workout pages and Strava visual state so the workouts page reflects the change
     _db = db.get_db()
+    if hasattr(_db, "delete_app_config"):
+        _db.delete_app_config(f"strava_visual_upload_{hevy_id}")
     for page in range(1, 11):
         _db.set_app_config(f"hevy_workouts_page_{page}", {})
 

@@ -169,6 +169,11 @@ def set_app_config(key: str, value: dict, **kw) -> None:
     return get_db().set_app_config(key, value)
 
 
+def delete_app_config(key: str, **kw) -> None:
+    """Delete a JSON value from the generic key-value app cache."""
+    return get_db().delete_app_config(key)
+
+
 def claim_pending(hevy_id: str, payload: dict, **kw) -> bool:
     return get_db().claim_pending(hevy_id, payload)
 

@@ -516,6 +516,12 @@ class SQLiteDatabase(Database):
         conn.commit()
         conn.close()
 
+    def delete_app_config(self, key: str) -> None:
+        conn = self._get_conn()
+        conn.execute("DELETE FROM app_cache WHERE key = ?", (key,))
+        conn.commit()
+        conn.close()
+
     def claim_pending(self, hevy_id: str, payload: dict) -> bool:
         conn = self._get_conn()
         cur = conn.execute(

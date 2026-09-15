@@ -536,6 +536,12 @@ class PostgresDatabase(Database):
                 )
             conn.commit()
 
+    def delete_app_config(self, key: str) -> None:
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM app_cache WHERE key = %s", (key,))
+            conn.commit()
+
     def claim_pending(self, hevy_id: str, payload: dict) -> bool:
         with self._get_conn() as conn:
             with conn.cursor() as cur:
