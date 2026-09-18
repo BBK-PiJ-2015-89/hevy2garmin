@@ -491,6 +491,7 @@ def test_new_visual_upload_failure_does_not_touch_existing_strava_activity(
         _Resp({"access_token": "access"}),
         _Resp({"message": "Error Processing Data"}, RuntimeError("Error Processing Data")),
     ]
+    session.delete.return_value = _Resp({})
     session.put.return_value = _Resp({})
 
     result = try_upload_visual_strength(
@@ -538,7 +539,7 @@ def test_failed_strava_processing_does_not_touch_existing_strava_activity(
     assert "strava_visual_upload_test-workout-123" not in store.values
 
 
-def test_replace_existing_falls_back_to_metadata_update_when_upload_is_rejected(
+def test_replace_existing_deletes_old_copy_before_reupload(
     sample_workout: dict,
     monkeypatch,
 ) -> None:
@@ -565,11 +566,13 @@ def test_replace_existing_falls_back_to_metadata_update_when_upload_is_rejected(
         session=session,
     )
 
-    assert result.status == "metadata_updated"
-    assert result.activity_id == 999
-    session.put.assert_called_once()
-    assert session.put.call_args.args[0] == "https://strava.test/api/v3/activities/999"
-    assert "Bench Press (Barbell)" in session.put.call_args.kwargs["json"]["description"]
+    assert result.status == "failed"
+    assert "Error Processing Data" in result.error
+    session.delete.assert_called_once()
+    assert session.delete.call_args.args[0] == "https://strava.test/api/v3/activities/999"
+    session.put.assert_not_called()
+    assert session.method_calls[1][0] == "delete"
+    assert session.method_calls[2][0] == "post"
 
 def test_replace_existing_visual_activity_deletes_and_reuploads(
     sample_workout: dict,

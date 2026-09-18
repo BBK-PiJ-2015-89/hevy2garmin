@@ -932,6 +932,24 @@ def try_upload_visual_strength(
                 replaced_activity_id,
             )
 
+        if replaced_activity_id is not None:
+            try:
+                _delete_activity(token, replaced_activity_id, session=session)
+                logger.info(
+                    "Strava visual upload: deleted old activity %s before replacement",
+                    replaced_activity_id,
+                )
+            except Exception as exc:
+                if _is_not_found_error(exc):
+                    logger.info(
+                        "Strava visual upload: old activity %s was already gone; creating a fresh copy",
+                        replaced_activity_id,
+                    )
+                else:
+                    raise RuntimeError(
+                        f"Could not delete existing Strava strength copy {replaced_activity_id}: {exc}"
+                    ) from exc
+
         start_offset_seconds = (
             _workout_duration_seconds(workout)
             + _duplicate_start_offset_seconds(config)
@@ -963,22 +981,6 @@ def try_upload_visual_strength(
             raise RuntimeError("Strava did not return an upload id")
         result = _poll_upload(token, str(upload_id), session=session)
         if result.status == "uploaded":
-            delete_error = None
-            if replaced_activity_id is not None:
-                try:
-                    _delete_activity(token, replaced_activity_id, session=session)
-                    logger.info(
-                        "Strava visual upload: deleted old activity %s",
-                        replaced_activity_id,
-                    )
-                except Exception as exc:
-                    delete_error = str(exc)
-                    logger.warning(
-                        "Strava visual upload: new activity created but old "
-                        "activity %s could not be deleted: %s",
-                        replaced_activity_id,
-                        exc,
-                    )
             _mark_uploaded(
                 store,
                 hevy_id,
@@ -987,13 +989,7 @@ def try_upload_visual_strength(
                 replaced_activity_id=replaced_activity_id,
             )
             if replaced_activity_id is not None:
-                if delete_error is None:
-                    result.status = "replaced"
-                else:
-                    result.error = (
-                        "created new Strava copy, but could not delete old one: "
-                        f"{delete_error}"
-                    )
+                result.status = "replaced"
             logger.info(
                 "Strava visual upload: created activity %s", result.activity_id
             )
@@ -1003,52 +999,7 @@ def try_upload_visual_strength(
             )
         else:
             logger.warning("Strava visual upload failed: %s", result.error)
-            try:
-                if replaced_activity_id is not None:
-                    _update_activity_metadata(
-                        token,
-                        replaced_activity_id,
-                        name=title,
-                        description=description,
-                        session=session,
-                    )
-                    result.status = "metadata_updated"
-                    result.activity_id = replaced_activity_id
-                    result.error = (
-                        "Structured Strava re-upload failed, so the existing "
-                        "structured Strava copy title and description were refreshed instead."
-                    )
-                    logger.info(
-                        "Strava visual upload fallback: updated activity %s metadata",
-                        replaced_activity_id,
-                    )
-            except Exception as exc:
-                logger.warning("Strava visual upload fallback failed: %s", exc)
         return result
     except Exception as exc:
         logger.warning("Strava visual upload failed: %s", exc)
-        if token:
-            try:
-                if replaced_activity_id is not None:
-                    _update_activity_metadata(
-                        token,
-                        replaced_activity_id,
-                        name=title,
-                        description=description,
-                        session=session,
-                    )
-                    logger.info(
-                        "Strava visual upload fallback: updated activity %s metadata after upload exception",
-                        replaced_activity_id,
-                    )
-                    return StravaUploadResult(
-                        status="metadata_updated",
-                        activity_id=replaced_activity_id,
-                        error=(
-                            "Structured Strava re-upload failed, so the existing "
-                            "structured Strava copy title and description were refreshed instead."
-                        ),
-                    )
-            except Exception as fallback_exc:
-                logger.warning("Strava visual upload fallback failed: %s", fallback_exc)
         return StravaUploadResult(status="failed", error=str(exc))
