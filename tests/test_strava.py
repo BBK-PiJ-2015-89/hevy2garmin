@@ -196,7 +196,9 @@ def test_upload_refreshes_token_posts_json_and_marks_state(
     uploaded_json = json.loads(upload_call.kwargs["files"]["file"][1].decode("utf-8"))
     assert uploaded_json["sets"][0]["exercise_type"] == "BARBELL_BENCH_PRESS"
     assert uploaded_json["streams"] == {"time": [0, 2700], "heartrate": [90, 90]}
-    assert store.values["strava_visual_upload_test-workout-123"]["activity_id"] == 456
+    state = store.values["strava_visual_upload_test-workout-123"]
+    assert state["activity_id"] == 456
+    assert state["structured"] is True
 
 
 def test_missing_credentials_is_non_fatal(sample_workout: dict) -> None:
@@ -215,7 +217,7 @@ def test_already_uploaded_is_skipped(sample_workout: dict) -> None:
     store = _Store()
     store.set_app_config(
         "strava_visual_upload_test-workout-123",
-        {"activity_id": 999},
+        {"activity_id": 999, "structured": True},
     )
     session = MagicMock()
     result = try_upload_visual_strength(
@@ -228,11 +230,44 @@ def test_already_uploaded_is_skipped(sample_workout: dict) -> None:
     session.post.assert_not_called()
 
 
-def test_update_existing_visual_activity_updates_description(sample_workout: dict) -> None:
+def test_text_only_fallback_state_does_not_block_structured_upload(
+    sample_workout: dict,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("STRAVA_BASE_URL", "https://strava.test")
+    monkeypatch.setenv("STRAVA_API_BASE_URL", "https://strava.test/api/v3")
     store = _Store()
     store.set_app_config(
         "strava_visual_upload_test-workout-123",
         {"activity_id": 999},
+    )
+    session = MagicMock()
+    session.post.side_effect = [
+        _Resp({"access_token": "access"}),
+        _Resp({"id": 123, "id_str": "123", "status": "success"}),
+    ]
+    session.get.return_value = _Resp(
+        {"id": 123, "id_str": "123", "error": None, "activity_id": 456}
+    )
+
+    result = try_upload_visual_strength(
+        sample_workout,
+        config=_config(),
+        store=store,
+        session=session,
+    )
+
+    assert result.status == "uploaded"
+    assert result.activity_id == 456
+    assert session.post.call_count == 2
+    assert store.values["strava_visual_upload_test-workout-123"]["structured"] is True
+
+
+def test_update_existing_visual_activity_updates_description(sample_workout: dict) -> None:
+    store = _Store()
+    store.set_app_config(
+        "strava_visual_upload_test-workout-123",
+        {"activity_id": 999, "structured": True},
     )
     session = MagicMock()
     session.post.return_value = _Resp({"access_token": "access"})
@@ -257,7 +292,7 @@ def test_update_existing_visual_activity_updates_description(sample_workout: dic
     session.get.assert_not_called()
 
 
-def test_new_visual_upload_falls_back_to_matching_strava_activity(
+def test_new_visual_upload_failure_does_not_touch_existing_strava_activity(
     sample_workout: dict,
     monkeypatch,
 ) -> None:
@@ -269,14 +304,6 @@ def test_new_visual_upload_falls_back_to_matching_strava_activity(
         _Resp({"access_token": "access"}),
         _Resp({"message": "Error Processing Data"}, RuntimeError("Error Processing Data")),
     ]
-    session.get.return_value = _Resp([
-        {
-            "id": 456,
-            "name": "Full Body 1",
-            "sport_type": "WeightTraining",
-            "start_date": "2026-04-01T20:00:00Z",
-        }
-    ])
     session.put.return_value = _Resp({})
 
     result = try_upload_visual_strength(
@@ -286,13 +313,14 @@ def test_new_visual_upload_falls_back_to_matching_strava_activity(
         session=session,
     )
 
-    assert result.status == "updated"
-    assert result.activity_id == 456
-    session.put.assert_called_once()
-    assert store.values["strava_visual_upload_test-workout-123"]["activity_id"] == 456
+    assert result.status == "failed"
+    assert "Error Processing Data" in result.error
+    session.get.assert_not_called()
+    session.put.assert_not_called()
+    assert "strava_visual_upload_test-workout-123" not in store.values
 
 
-def test_failed_strava_processing_falls_back_to_matching_activity(
+def test_failed_strava_processing_does_not_touch_existing_strava_activity(
     sample_workout: dict,
     monkeypatch,
 ) -> None:
@@ -306,14 +334,6 @@ def test_failed_strava_processing_falls_back_to_matching_activity(
     ]
     session.get.side_effect = [
         _Resp({"id": 123, "id_str": "123", "error": "Error Processing Data"}),
-        _Resp([
-            {
-                "id": 456,
-                "name": "Push",
-                "sport_type": "WeightTraining",
-                "start_date": "2026-04-01T20:00:00Z",
-            }
-        ]),
     ]
     session.put.return_value = _Resp({})
 
@@ -324,10 +344,10 @@ def test_failed_strava_processing_falls_back_to_matching_activity(
         session=session,
     )
 
-    assert result.status == "updated"
-    assert result.activity_id == 456
-    session.put.assert_called_once()
-    assert store.values["strava_visual_upload_test-workout-123"]["activity_id"] == 456
+    assert result.status == "failed"
+    assert result.error == "Error Processing Data"
+    session.put.assert_not_called()
+    assert "strava_visual_upload_test-workout-123" not in store.values
 
 
 def test_replace_existing_falls_back_to_metadata_update_when_upload_is_rejected(
@@ -339,7 +359,7 @@ def test_replace_existing_falls_back_to_metadata_update_when_upload_is_rejected(
     store = _Store()
     store.set_app_config(
         "strava_visual_upload_test-workout-123",
-        {"activity_id": 999, "external_id": "old.json"},
+        {"activity_id": 999, "external_id": "old.json", "structured": True},
     )
     session = MagicMock()
     session.post.side_effect = [
@@ -356,7 +376,7 @@ def test_replace_existing_falls_back_to_metadata_update_when_upload_is_rejected(
         session=session,
     )
 
-    assert result.status == "updated"
+    assert result.status == "metadata_updated"
     assert result.activity_id == 999
     session.put.assert_called_once()
     assert session.put.call_args.args[0] == "https://strava.test/api/v3/activities/999"
@@ -375,7 +395,7 @@ def test_replace_existing_visual_activity_deletes_and_reuploads(
     store = _Store()
     store.set_app_config(
         "strava_visual_upload_test-workout-123",
-        {"activity_id": 999, "external_id": "old.json"},
+        {"activity_id": 999, "external_id": "old.json", "structured": True},
     )
     session = MagicMock()
     session.post.side_effect = [
@@ -406,4 +426,5 @@ def test_replace_existing_visual_activity_deletes_and_reuploads(
     )
     state = store.values["strava_visual_upload_test-workout-123"]
     assert state["activity_id"] == 457
+    assert state["structured"] is True
     assert state["replaced_activity_id"] == 999

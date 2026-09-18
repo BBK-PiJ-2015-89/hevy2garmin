@@ -988,7 +988,9 @@ async def workouts_page(request: Request):
                 else None
             )
             w["strava_visual_uploaded"] = bool(
-                visual_state and visual_state.get("activity_id")
+                visual_state
+                and visual_state.get("activity_id")
+                and visual_state.get("structured") is True
             )
             state = states.get(w["id"])
             if state and state["kind"] == "terminal":
@@ -2198,11 +2200,19 @@ async def api_strava_visual_workout(request: Request, hevy_id: str):
             replace_existing=replace_existing,
             force_new_external_id=force_new_external_id,
         )
-        ok = result.status in {"uploaded", "updated", "replaced", "processing", "skipped"}
+        ok = result.status in {
+            "uploaded",
+            "updated",
+            "replaced",
+            "metadata_updated",
+            "processing",
+            "skipped",
+        }
         messages = {
             "uploaded": "Sent to Strava.",
             "updated": "Updated Strava.",
             "replaced": "Re-synced Strava.",
+            "metadata_updated": "Updated the existing Strava copy text only. The structured re-upload failed.",
             "processing": "Strava is still processing it.",
             "skipped": "Already sent to Strava.",
         }
