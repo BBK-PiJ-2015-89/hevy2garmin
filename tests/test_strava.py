@@ -65,7 +65,7 @@ def test_enabled_can_come_from_config_or_env(monkeypatch):
     assert visual_strength_upload_enabled({})
 
 
-def test_build_strength_payload_contains_sets_and_hr(sample_workout: dict) -> None:
+def test_build_strength_payload_uses_minimal_strava_json(sample_workout: dict) -> None:
     payload = build_strength_payload(
         sample_workout,
         config=_config(),
@@ -77,11 +77,12 @@ def test_build_strength_payload_contains_sets_and_hr(sample_workout: dict) -> No
     assert payload["start_time"] == "2026-04-01T21:00:00+01:00"
     assert payload["utc_offset"] == 3600
     assert payload["elapsed_time"] == 2700
-    assert payload["total_calories"] == 321
-    assert payload["streams"] == {"time": [0, 60, 2700], "heartrate": [80, 112, 112]}
+    assert "active_time" not in payload
+    assert "creator" not in payload
+    assert "total_calories" not in payload
+    assert "streams" not in payload
     assert payload["sets"][0] == {
         "exercise_type": "BENCH_PRESS_GENERIC",
-        "start_time": "2026-04-01T21:00:00+01:00",
         "repetitions": 12,
         "weight": 40.0,
     }
@@ -164,10 +165,12 @@ def test_recent_hevy_exercises_upload_with_safe_strava_categories() -> None:
     ]
 
 
-def test_hr_stream_is_anchored_to_full_duration(sample_workout: dict) -> None:
+def test_optional_hr_stream_is_anchored_to_full_duration(sample_workout: dict) -> None:
+    config = _config()
+    config["strava"]["include_optional_upload_details"] = True
     payload = build_strength_payload(
         sample_workout,
-        config=_config(),
+        config=config,
         hr_samples=[{"time": 180, "hr": 92}, {"time": 240, "hr": 100}],
     )
 
@@ -175,6 +178,7 @@ def test_hr_stream_is_anchored_to_full_duration(sample_workout: dict) -> None:
         "time": [0, 180, 240, 2700],
         "heartrate": [92, 92, 100, 100],
     }
+    assert payload["sets"][0]["start_time"] == "2026-04-01T21:00:00+01:00"
 
 
 def test_generate_description_lists_workout_details(sample_workout: dict) -> None:
@@ -230,10 +234,10 @@ def test_upload_refreshes_token_posts_json_and_marks_state(
     assert "avg HR 90 bpm" in upload_call.kwargs["data"]["description"]
     assert "delete" not in upload_call.kwargs["data"]["description"].lower()
     uploaded_json = json.loads(upload_call.kwargs["files"]["file"][1].decode("utf-8"))
-    assert uploaded_json["start_time"] == "2026-04-01T21:01:00+01:00"
+    assert uploaded_json["start_time"] == "2026-04-01T21:50:00+01:00"
     assert uploaded_json["sets"][0]["exercise_type"] == "BENCH_PRESS_GENERIC"
-    assert uploaded_json["sets"][0]["start_time"] == "2026-04-01T21:01:00+01:00"
-    assert uploaded_json["streams"] == {"time": [0, 2700], "heartrate": [90, 90]}
+    assert "start_time" not in uploaded_json["sets"][0]
+    assert "streams" not in uploaded_json
     state = store.values["strava_visual_upload_test-workout-123"]
     assert state["activity_id"] == 456
     assert state["structured"] is True

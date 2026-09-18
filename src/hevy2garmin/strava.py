@@ -33,7 +33,7 @@ _DESCRIPTION_FOOTER = (
     "Bespoke sync by Graeme's Hevy2Garmin build: Hevy workout detail mixed "
     "with Garmin HR, polished for Strava."
 )
-_DEFAULT_DUPLICATE_START_OFFSET_SECONDS = 60
+_DEFAULT_DUPLICATE_START_OFFSET_SECONDS = 300
 
 _STRAVA_EXERCISE_ALIASES = {
     "LUNGE": "LUNGE_GENERIC",
@@ -289,13 +289,29 @@ def _duplicate_start_offset_seconds(config: dict[str, Any] | None) -> int:
         _DEFAULT_DUPLICATE_START_OFFSET_SECONDS,
     )
     try:
-        return max(0, min(300, int(raw)))
+        return max(0, min(3600, int(raw)))
     except (TypeError, ValueError):
         return _DEFAULT_DUPLICATE_START_OFFSET_SECONDS
 
 
+def _workout_duration_seconds(workout: dict[str, Any]) -> int:
+    start = _parse_timestamp(workout.get("start_time") or workout.get("startTime"))
+    end = _parse_timestamp(workout.get("end_time") or workout.get("endTime"))
+    if start is None or end is None:
+        return 0
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    return max(0, int(round((end - start).total_seconds())))
+
+
 def _precise_exercise_types_enabled(config: dict[str, Any] | None) -> bool:
     return _truthy(_strava_config(config).get("precise_exercise_types"))
+
+
+def _include_optional_upload_details(config: dict[str, Any] | None) -> bool:
+    return _truthy(_strava_config(config).get("include_optional_upload_details"))
 
 
 def _timing_profile(config: dict[str, Any] | None) -> dict[str, int]:
@@ -386,6 +402,7 @@ def _build_sets(
     config: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     sets: list[dict[str, Any]] = []
+    include_timing = _include_optional_upload_details(config)
     for item in _set_timeline(workout, duration_s, config):
         set_data = item["set"]
         exercise_type = _exercise_type(item["exercise"], config)
@@ -396,12 +413,11 @@ def _build_sets(
             )
             continue
 
-        payload: dict[str, Any] = {
-            "exercise_type": exercise_type,
-            "start_time": _format_iso_offset(
+        payload: dict[str, Any] = {"exercise_type": exercise_type}
+        if include_timing:
+            payload["start_time"] = _format_iso_offset(
                 start_dt + timedelta(seconds=float(item["start_offset_s"]))
-            ),
-        }
+            )
 
         reps = set_data.get("reps")
         if reps is not None:
@@ -605,14 +621,16 @@ def build_strength_payload(
         "start_time": _format_iso_offset(strava_start),
         "utc_offset": _utc_offset_seconds(config, start),
         "elapsed_time": duration_s,
-        "active_time": duration_s,
-        "creator": {"name": "hevy2garmin"},
         "sets": sets,
     }
-    if calories is not None:
+    include_optional = _include_optional_upload_details(config)
+    if include_optional:
+        payload["active_time"] = duration_s
+        payload["creator"] = {"name": "hevy2garmin"}
+    if include_optional and calories is not None:
         payload["total_calories"] = int(calories)
-    streams = _build_streams(hr_samples, duration_s)
-    if streams:
+    streams = _build_streams(hr_samples, duration_s) if include_optional else {}
+    if include_optional and streams:
         payload["streams"] = streams
     return payload
 
@@ -867,7 +885,10 @@ def try_upload_visual_strength(
             config=config,
             hr_samples=hr_samples,
             calories=calories,
-            start_offset_seconds=_duplicate_start_offset_seconds(config),
+            start_offset_seconds=(
+                _workout_duration_seconds(workout)
+                + _duplicate_start_offset_seconds(config)
+            ),
         )
         external_id = _external_id(
             workout,
