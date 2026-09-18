@@ -80,12 +80,12 @@ def test_build_strength_payload_contains_sets_and_hr(sample_workout: dict) -> No
     assert payload["total_calories"] == 321
     assert payload["streams"] == {"time": [0, 60, 2700], "heartrate": [80, 112, 112]}
     assert payload["sets"][0] == {
-        "exercise_type": "BARBELL_BENCH_PRESS",
+        "exercise_type": "BENCH_PRESS_GENERIC",
         "start_time": "2026-04-01T21:00:00+01:00",
         "repetitions": 12,
         "weight": 40.0,
     }
-    assert payload["sets"][4]["exercise_type"] == "OVERHEAD_DUMBBELL_PRESS"
+    assert payload["sets"][4]["exercise_type"] == "SHOULDER_PRESS_GENERIC"
     assert payload["sets"][4]["repetitions"] == 12
 
 
@@ -121,11 +121,47 @@ def test_lunge_variants_upload_as_generic_strava_lunge_with_weight() -> None:
     assert [item["exercise_type"] for item in payload["sets"]] == [
         "LUNGE_GENERIC",
         "LUNGE_GENERIC",
-        "DUMBBELL_REVERSE_LUNGE",
-        "DUMBBELL_WALKING_LUNGES",
+        "LUNGE_GENERIC",
+        "LUNGE_GENERIC",
     ]
     assert payload["sets"][0]["weight"] == 14.0
     assert payload["sets"][1]["weight"] == 20.0
+
+
+def test_recent_hevy_exercises_upload_with_safe_strava_categories() -> None:
+    workout = {
+        "id": "full-body-1",
+        "title": "Full Body 1",
+        "start_time": "2026-09-15T13:58:00+00:00",
+        "end_time": "2026-09-15T14:30:00+00:00",
+        "exercises": [
+            {
+                "title": "Goblet Squat",
+                "sets": [{"type": "normal", "weight_kg": 5, "reps": 8}],
+            },
+            {
+                "title": "Floor Press (Dumbbell)",
+                "sets": [{"type": "normal", "weight_kg": 14, "reps": 10}],
+            },
+            {
+                "title": "Dumbbell Row",
+                "sets": [{"type": "normal", "weight_kg": 14, "reps": 8}],
+            },
+            {
+                "title": "Bicep Curl (Dumbbell)",
+                "sets": [{"type": "normal", "weight_kg": 14, "reps": 20}],
+            },
+        ],
+    }
+
+    payload = build_strength_payload(workout, config=_config())
+
+    assert [item["exercise_type"] for item in payload["sets"]] == [
+        "SQUAT_GENERIC",
+        "BENCH_PRESS_GENERIC",
+        "ROW_GENERIC",
+        "CURL_GENERIC",
+    ]
 
 
 def test_hr_stream_is_anchored_to_full_duration(sample_workout: dict) -> None:
@@ -195,7 +231,7 @@ def test_upload_refreshes_token_posts_json_and_marks_state(
     assert "delete" not in upload_call.kwargs["data"]["description"].lower()
     uploaded_json = json.loads(upload_call.kwargs["files"]["file"][1].decode("utf-8"))
     assert uploaded_json["start_time"] == "2026-04-01T21:01:00+01:00"
-    assert uploaded_json["sets"][0]["exercise_type"] == "BARBELL_BENCH_PRESS"
+    assert uploaded_json["sets"][0]["exercise_type"] == "BENCH_PRESS_GENERIC"
     assert uploaded_json["sets"][0]["start_time"] == "2026-04-01T21:01:00+01:00"
     assert uploaded_json["streams"] == {"time": [0, 2700], "heartrate": [90, 90]}
     state = store.values["strava_visual_upload_test-workout-123"]

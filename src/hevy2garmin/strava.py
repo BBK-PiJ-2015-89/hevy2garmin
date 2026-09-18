@@ -44,6 +44,41 @@ _STRAVA_EXERCISE_ALIASES = {
     "DUMBBELL_BULGARIAN_SPLIT_SQUAT": "DUMBBELL_BULGARIAN_SPLIT_SQUATS",
 }
 
+_STRAVA_GENERIC_EXERCISE_TYPES_BY_CATEGORY = {
+    0: "BENCH_PRESS_GENERIC",
+    1: "CALF_RAISE_GENERIC",
+    2: "CARDIO_GENERIC",
+    3: "CARRY_GENERIC",
+    4: "CHOP_GENERIC",
+    5: "CORE_GENERIC",
+    6: "CORE_GENERIC",
+    7: "CURL_GENERIC",
+    8: "DEADLIFT_GENERIC",
+    9: "FLYE_GENERIC",
+    10: "HIP_RAISE_GENERIC",
+    11: "HIP_STABILITY_GENERIC",
+    12: "HIP_SWING_GENERIC",
+    13: "HYPEREXTENSION_GENERIC",
+    14: "LATERAL_RAISE_GENERIC",
+    15: "LEG_CURL_GENERIC",
+    16: "LEG_RAISE_GENERIC",
+    17: "LUNGE_GENERIC",
+    18: "OLYMPIC_LIFT_GENERIC",
+    19: "PLANK_GENERIC",
+    20: "PLYO_GENERIC",
+    21: "PULL_UP_GENERIC",
+    22: "PUSH_UP_GENERIC",
+    23: "ROW_GENERIC",
+    24: "SHOULDER_PRESS_GENERIC",
+    25: "SHOULDER_STABILITY_GENERIC",
+    26: "SHRUG_GENERIC",
+    27: "SIT_UP_GENERIC",
+    28: "SQUAT_GENERIC",
+    29: "TOTAL_BODY_GENERIC",
+    30: "TRICEPS_EXTENSION_GENERIC",
+    31: "WARM_UP_GENERIC",
+}
+
 _STRAVA_TITLE_EXERCISE_TYPES = {
     "bulgariansplitsquatdumbbell": "DUMBBELL_BULGARIAN_SPLIT_SQUATS",
     "curtsylungedumbbell": "CURTSY_LUNGE",
@@ -259,6 +294,10 @@ def _duplicate_start_offset_seconds(config: dict[str, Any] | None) -> int:
         return _DEFAULT_DUPLICATE_START_OFFSET_SECONDS
 
 
+def _precise_exercise_types_enabled(config: dict[str, Any] | None) -> bool:
+    return _truthy(_strava_config(config).get("precise_exercise_types"))
+
+
 def _timing_profile(config: dict[str, Any] | None) -> dict[str, int]:
     timing = ((config or {}).get("timing") or {}) if isinstance(config, dict) else {}
     return {
@@ -326,13 +365,17 @@ def _title_key(title: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", title.lower())
 
 
-def _exercise_type(exercise: dict[str, Any]) -> str | None:
+def _exercise_type(exercise: dict[str, Any], config: dict[str, Any] | None) -> str | None:
     title = exercise.get("title") or exercise.get("name") or ""
     title_override = _STRAVA_TITLE_EXERCISE_TYPES.get(_title_key(str(title)))
-    if title_override:
+    if title_override and _precise_exercise_types_enabled(config):
         return title_override
     cat, sub, _ = lookup_exercise(title, exercise.get("exercise_template_id"))
-    _, exercise_name = fit_exercise_strings(cat, sub)
+    if not _precise_exercise_types_enabled(config):
+        return _STRAVA_GENERIC_EXERCISE_TYPES_BY_CATEGORY.get(cat)
+    category_name, exercise_name = fit_exercise_strings(cat, sub)
+    if not category_name:
+        return None
     return _STRAVA_EXERCISE_ALIASES.get(exercise_name, exercise_name)
 
 
@@ -345,7 +388,7 @@ def _build_sets(
     sets: list[dict[str, Any]] = []
     for item in _set_timeline(workout, duration_s, config):
         set_data = item["set"]
-        exercise_type = _exercise_type(item["exercise"])
+        exercise_type = _exercise_type(item["exercise"], config)
         if not exercise_type:
             name = item["exercise"].get("title") or item["exercise"].get("name") or "Unknown"
             logger.warning(
