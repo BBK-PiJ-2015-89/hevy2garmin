@@ -2205,6 +2205,7 @@ async def api_strava_visual_workout(request: Request, hevy_id: str):
             "updated",
             "replaced",
             "metadata_updated",
+            "replaced_old_not_deleted",
             "processing",
             "skipped",
         }
@@ -2213,6 +2214,7 @@ async def api_strava_visual_workout(request: Request, hevy_id: str):
             "updated": "Updated Strava.",
             "replaced": "Re-synced Strava.",
             "metadata_updated": "Updated the existing Strava copy text only. The structured re-upload failed.",
+            "replaced_old_not_deleted": result.error or "Sent to Strava, but the old Strava copy still needs deleting manually.",
             "processing": "Strava is still processing it.",
             "skipped": "Already sent to Strava.",
         }

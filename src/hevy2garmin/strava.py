@@ -37,6 +37,7 @@ _DESCRIPTION_FOOTER = (
     "with Garmin HR, polished for Strava."
 )
 _DEFAULT_DUPLICATE_START_OFFSET_SECONDS = 300
+_DEFAULT_UNDELETED_REPLACEMENT_GAP_SECONDS = 3600
 
 _STRAVA_EXERCISE_ALIASES = {
     "LUNGE": "LUNGE_GENERIC",
@@ -295,6 +296,17 @@ def _duplicate_start_offset_seconds(config: dict[str, Any] | None) -> int:
         return max(0, min(3600, int(raw)))
     except (TypeError, ValueError):
         return _DEFAULT_DUPLICATE_START_OFFSET_SECONDS
+
+
+def _undeleted_replacement_gap_seconds(config: dict[str, Any] | None) -> int:
+    raw = _strava_config(config).get(
+        "undeleted_replacement_gap_seconds",
+        _DEFAULT_UNDELETED_REPLACEMENT_GAP_SECONDS,
+    )
+    try:
+        return max(60, min(86400, int(raw)))
+    except (TypeError, ValueError):
+        return _DEFAULT_UNDELETED_REPLACEMENT_GAP_SECONDS
 
 
 def _workout_duration_seconds(workout: dict[str, Any]) -> int:
@@ -662,6 +674,8 @@ def _mark_uploaded(
     *,
     replaced_activity_id: int | None = None,
     file_type: str = "fit",
+    upload_start_offset_seconds: int | None = None,
+    undeleted_activity_id: int | None = None,
 ) -> None:
     if store is None or not hasattr(store, "set_app_config") or not result.activity_id:
         return
@@ -676,6 +690,10 @@ def _mark_uploaded(
         }
         if replaced_activity_id is not None:
             state["replaced_activity_id"] = replaced_activity_id
+        if upload_start_offset_seconds is not None:
+            state["upload_start_offset_seconds"] = upload_start_offset_seconds
+        if undeleted_activity_id is not None:
+            state["undeleted_activity_id"] = undeleted_activity_id
         store.set_app_config(_state_key(hevy_id), state)
     except Exception:
         logger.debug("Could not store Strava visual upload state", exc_info=True)
@@ -827,6 +845,20 @@ def _is_not_found_error(exc: Exception) -> bool:
     return "404" in text and "not found" in text
 
 
+def _is_unauthorized_error(exc: Exception) -> bool:
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if status in {401, 403}:
+        return True
+    text = str(exc).lower()
+    return (
+        "401" in text
+        or "403" in text
+        or "unauthorized" in text
+        or "forbidden" in text
+    )
+
+
 def _poll_upload(
     token: str,
     upload_id: str,
@@ -919,6 +951,8 @@ def try_upload_visual_strength(
     )
     token = ""
     replaced_activity_id = None
+    undeleted_activity_id = None
+    delete_error = None
 
     try:
         token = refresh_access_token(creds, session=session)
@@ -945,6 +979,14 @@ def try_upload_visual_strength(
                         "Strava visual upload: old activity %s was already gone; creating a fresh copy",
                         replaced_activity_id,
                     )
+                elif _is_unauthorized_error(exc):
+                    undeleted_activity_id = replaced_activity_id
+                    delete_error = str(exc)
+                    logger.warning(
+                        "Strava visual upload: could not delete old activity %s; continuing with a shifted replacement: %s",
+                        replaced_activity_id,
+                        exc,
+                    )
                 else:
                     raise RuntimeError(
                         f"Could not delete existing Strava strength copy {replaced_activity_id}: {exc}"
@@ -954,6 +996,17 @@ def try_upload_visual_strength(
             _workout_duration_seconds(workout)
             + _duplicate_start_offset_seconds(config)
         )
+        if undeleted_activity_id is not None:
+            previous_offset = None
+            if structured_state:
+                try:
+                    previous_offset = int(structured_state.get("upload_start_offset_seconds") or 0)
+                except (TypeError, ValueError):
+                    previous_offset = None
+            start_offset_seconds = max(
+                start_offset_seconds,
+                previous_offset or start_offset_seconds,
+            ) + _undeleted_replacement_gap_seconds(config)
         external_id = _external_id(
             workout,
             unique=force_new_external_id or replace_existing,
@@ -987,8 +1040,17 @@ def try_upload_visual_strength(
                 result,
                 external_id,
                 replaced_activity_id=replaced_activity_id,
+                upload_start_offset_seconds=start_offset_seconds,
+                undeleted_activity_id=undeleted_activity_id,
             )
-            if replaced_activity_id is not None:
+            if undeleted_activity_id is not None:
+                result.status = "replaced_old_not_deleted"
+                result.error = (
+                    "Created a new Strava strength copy, but Strava would not let "
+                    f"the app delete old copy {undeleted_activity_id}. Delete that old copy manually."
+                    f" ({delete_error})"
+                )
+            elif replaced_activity_id is not None:
                 result.status = "replaced"
             logger.info(
                 "Strava visual upload: created activity %s", result.activity_id

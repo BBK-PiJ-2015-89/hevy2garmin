@@ -574,6 +574,63 @@ def test_replace_existing_deletes_old_copy_before_reupload(
     assert session.method_calls[1][0] == "delete"
     assert session.method_calls[2][0] == "post"
 
+def test_replace_existing_continues_when_delete_is_unauthorized(
+    sample_workout: dict,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("STRAVA_BASE_URL", "https://strava.test")
+    monkeypatch.setenv("STRAVA_API_BASE_URL", "https://strava.test/api/v3")
+    monkeypatch.setattr(
+        "hevy2garmin.strava.uuid.uuid4",
+        lambda: SimpleNamespace(hex="abcdef1234567890"),
+    )
+    fit_calls = _stub_fit_builder(monkeypatch)
+    store = _Store()
+    store.set_app_config(
+        "strava_visual_upload_test-workout-123",
+        {
+            "activity_id": 999,
+            "external_id": "old.fit",
+            "structured": True,
+            "file_type": "fit",
+            "upload_start_offset_seconds": 3000,
+        },
+    )
+    session = MagicMock()
+    session.post.side_effect = [
+        _Resp({"access_token": "access"}),
+        _Resp({"id": 124, "id_str": "124", "status": "success"}),
+    ]
+    session.delete.return_value = _Resp(
+        {},
+        RuntimeError("401 Client Error: Unauthorized for url"),
+    )
+    session.get.return_value = _Resp(
+        {"id": 124, "id_str": "124", "error": None, "activity_id": 457}
+    )
+
+    result = try_upload_visual_strength(
+        sample_workout,
+        config=_config(),
+        store=store,
+        replace_existing=True,
+        session=session,
+    )
+
+    assert result.status == "replaced_old_not_deleted"
+    assert result.activity_id == 457
+    assert "old copy 999" in result.error
+    session.delete.assert_called_once()
+    assert session.method_calls[1][0] == "delete"
+    assert session.method_calls[2][0] == "post"
+    assert fit_calls[0]["start_offset_seconds"] == 6600
+    state = store.values["strava_visual_upload_test-workout-123"]
+    assert state["activity_id"] == 457
+    assert state["file_type"] == "fit"
+    assert state["upload_start_offset_seconds"] == 6600
+    assert state["undeleted_activity_id"] == 999
+
+
 def test_replace_existing_visual_activity_deletes_and_reuploads(
     sample_workout: dict,
     monkeypatch,
