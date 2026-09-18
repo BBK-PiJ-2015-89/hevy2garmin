@@ -263,6 +263,7 @@ def test_upload_refreshes_token_posts_fit_and_marks_state(
         "application/octet-stream",
     )
     assert fit_calls[0]["start_offset_seconds"] == 3000
+    assert fit_calls[0]["hr_samples"] == [{"time": 0, "hr": 90}]
     state = store.values["strava_visual_upload_test-workout-123"]
     assert state["activity_id"] == 456
     assert state["structured"] is True
@@ -334,33 +335,53 @@ def test_text_only_fallback_state_does_not_block_structured_upload(
     assert fit_calls[0]["start_offset_seconds"] == 3000
 
 
-def test_update_existing_visual_activity_updates_description(sample_workout: dict) -> None:
+def test_update_existing_fit_visual_activity_replaces_fit_copy(
+    sample_workout: dict,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("STRAVA_BASE_URL", "https://strava.test")
+    monkeypatch.setenv("STRAVA_API_BASE_URL", "https://strava.test/api/v3")
+    monkeypatch.setattr(
+        "hevy2garmin.strava.uuid.uuid4",
+        lambda: SimpleNamespace(hex="abcdef1234567890"),
+    )
+    fit_calls = _stub_fit_builder(monkeypatch)
     store = _Store()
     store.set_app_config(
         "strava_visual_upload_test-workout-123",
         {"activity_id": 999, "structured": True, "file_type": "fit"},
     )
     session = MagicMock()
-    session.post.return_value = _Resp({"access_token": "access"})
-    session.put.return_value = _Resp({})
+    session.post.side_effect = [
+        _Resp({"access_token": "access"}),
+        _Resp({"id": 123, "id_str": "123", "status": "success"}),
+    ]
+    session.get.return_value = _Resp(
+        {"id": 123, "id_str": "123", "error": None, "activity_id": 456}
+    )
+    session.delete.return_value = _Resp({})
 
     result = try_upload_visual_strength(
         sample_workout,
         config=_config(),
         store=store,
+        hr_samples=[{"time": 0, "hr": 90}],
         calories=200,
         avg_hr=90,
         update_existing=True,
         session=session,
     )
 
-    assert result.status == "updated"
-    assert result.activity_id == 999
-    session.put.assert_called_once()
-    assert session.put.call_args.args[0] == "https://www.strava.com/api/v3/activities/999"
-    assert "Bench Press (Barbell)" in session.put.call_args.kwargs["json"]["description"]
-    assert "delete" not in session.put.call_args.kwargs["json"]["description"].lower()
-    session.get.assert_not_called()
+    assert result.status == "replaced"
+    assert result.activity_id == 456
+    session.put.assert_not_called()
+    session.delete.assert_called_once()
+    upload_call = session.post.call_args_list[1]
+    assert upload_call.kwargs["data"]["external_id"] == "hevy2garmin-test-workout-123-abcdef123456.fit"
+    assert fit_calls[0]["hr_samples"] == [{"time": 0, "hr": 90}]
+    state = store.values["strava_visual_upload_test-workout-123"]
+    assert state["file_type"] == "fit"
+    assert state["replaced_activity_id"] == 999
 
 
 def test_update_existing_json_visual_activity_migrates_to_fit(
@@ -428,10 +449,7 @@ def test_deleted_existing_visual_activity_creates_fresh_structured_copy(
         _Resp({"access_token": "access"}),
         _Resp({"id": 123, "id_str": "123", "status": "success"}),
     ]
-    session.put.return_value = _Resp(
-        {},
-        RuntimeError("404 Client Error: Not Found for url"),
-    )
+    session.delete.return_value = _Resp({})
     session.get.return_value = _Resp(
         {"id": 123, "id_str": "123", "error": None, "activity_id": 456}
     )
@@ -444,9 +462,10 @@ def test_deleted_existing_visual_activity_creates_fresh_structured_copy(
         session=session,
     )
 
-    assert result.status == "uploaded"
+    assert result.status == "replaced"
     assert result.activity_id == 456
-    assert session.put.call_count == 1
+    session.put.assert_not_called()
+    session.delete.assert_called_once()
     assert session.post.call_count == 2
     upload_call = session.post.call_args_list[1]
     assert (

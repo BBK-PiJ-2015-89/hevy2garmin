@@ -743,10 +743,9 @@ def build_strength_fit_file(
         workout,
         start_offset_seconds=start_offset_seconds,
     )
-    fit_hr_samples = hr_samples if _include_optional_upload_details(config) else None
     return generate_fit(
         shifted,
-        hr_samples=fit_hr_samples,
+        hr_samples=hr_samples,
         output_path=str(output_path),
         profile=_fit_profile_from_config(config),
     )
@@ -924,33 +923,12 @@ def try_upload_visual_strength(
     try:
         token = refresh_access_token(creds, session=session)
         existing_file_type = str((structured_state or {}).get("file_type") or "").lower()
-        if structured_state and replace_existing:
-            replaced_activity_id = int(structured_state["activity_id"])
-        elif structured_state and update_existing and existing_file_type == "fit":
-            activity_id = int(structured_state["activity_id"])
-            try:
-                _update_activity_metadata(
-                    token,
-                    activity_id,
-                    name=title,
-                    description=description,
-                    session=session,
-                )
-                logger.info("Strava visual upload: updated activity %s", activity_id)
-                return StravaUploadResult(status="updated", activity_id=activity_id)
-            except Exception as exc:
-                if not _is_not_found_error(exc):
-                    raise
-                logger.info(
-                    "Strava visual upload: stored activity %s no longer exists; creating a fresh structured copy",
-                    activity_id,
-                )
-                force_new_external_id = True
-        elif structured_state and update_existing:
+        if structured_state and (replace_existing or update_existing):
             replaced_activity_id = int(structured_state["activity_id"])
             force_new_external_id = True
             logger.info(
-                "Strava visual upload: replacing older structured activity %s with a FIT copy",
+                "Strava visual upload: replacing existing %s activity %s with a fresh FIT copy",
+                existing_file_type or "structured",
                 replaced_activity_id,
             )
 

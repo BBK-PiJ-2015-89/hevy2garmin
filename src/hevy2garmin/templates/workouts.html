@@ -538,7 +538,7 @@ async function postStravaVisual(hevyId, replaceExisting) {
 }
 
 async function stravaVisualWorkout(hevyId, replaceExisting, btn) {
-    if (replaceExisting && !confirm('Refresh the existing Strava activity title and description with the latest Hevy details?')) return;
+    if (replaceExisting && !confirm('Replace the existing Strava strength copy with a fresh FIT upload including the latest Hevy details and HR?')) return;
     const original = btn.textContent.trim();
     btn.disabled = true;
     btn.textContent = replaceExisting ? 'Refreshing…' : 'Sending…';
