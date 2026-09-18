@@ -33,6 +33,7 @@ _DESCRIPTION_FOOTER = (
     "Bespoke sync by Graeme's Hevy2Garmin build: Hevy workout detail mixed "
     "with Garmin HR, polished for Strava."
 )
+_DEFAULT_DUPLICATE_START_OFFSET_SECONDS = 60
 
 _STRAVA_EXERCISE_ALIASES = {
     "LUNGE": "LUNGE_GENERIC",
@@ -245,6 +246,17 @@ def _utc_offset_seconds(config: dict[str, Any] | None, at: datetime) -> int:
             return _uk_utc_offset_seconds(at)
         return 0
     return int(offset.total_seconds()) if offset is not None else 0
+
+
+def _duplicate_start_offset_seconds(config: dict[str, Any] | None) -> int:
+    raw = _strava_config(config).get(
+        "duplicate_start_offset_seconds",
+        _DEFAULT_DUPLICATE_START_OFFSET_SECONDS,
+    )
+    try:
+        return max(0, min(300, int(raw)))
+    except (TypeError, ValueError):
+        return _DEFAULT_DUPLICATE_START_OFFSET_SECONDS
 
 
 def _timing_profile(config: dict[str, Any] | None) -> dict[str, int]:
@@ -526,6 +538,7 @@ def build_strength_payload(
     config: dict[str, Any] | None = None,
     hr_samples: list[Any] | None = None,
     calories: int | None = None,
+    start_offset_seconds: int = 0,
 ) -> dict[str, Any]:
     """Build Strava's structured JSON strength payload from a Hevy workout."""
     start = _parse_timestamp(workout.get("start_time") or workout.get("startTime"))
@@ -538,7 +551,8 @@ def build_strength_payload(
         end = end.replace(tzinfo=timezone.utc)
 
     duration_s = max(1, int(round((end - start).total_seconds())))
-    strava_start = _strava_local_time(start, config)
+    start_for_upload = start + timedelta(seconds=max(0, int(start_offset_seconds)))
+    strava_start = _strava_local_time(start_for_upload, config)
     sets = _build_sets(workout, strava_start, duration_s, config)
     if not sets:
         raise ValueError("no mapped strength sets to upload to Strava")
@@ -679,6 +693,14 @@ def _delete_activity(
     resp.raise_for_status()
 
 
+def _is_not_found_error(exc: Exception) -> bool:
+    response = getattr(exc, "response", None)
+    if getattr(response, "status_code", None) == 404:
+        return True
+    text = str(exc).lower()
+    return "404" in text and "not found" in text
+
+
 def _poll_upload(
     token: str,
     upload_id: str,
@@ -778,21 +800,31 @@ def try_upload_visual_strength(
             replaced_activity_id = int(structured_state["activity_id"])
         elif structured_state and update_existing:
             activity_id = int(structured_state["activity_id"])
-            _update_activity_metadata(
-                token,
-                activity_id,
-                name=title,
-                description=description,
-                session=session,
-            )
-            logger.info("Strava visual upload: updated activity %s", activity_id)
-            return StravaUploadResult(status="updated", activity_id=activity_id)
+            try:
+                _update_activity_metadata(
+                    token,
+                    activity_id,
+                    name=title,
+                    description=description,
+                    session=session,
+                )
+                logger.info("Strava visual upload: updated activity %s", activity_id)
+                return StravaUploadResult(status="updated", activity_id=activity_id)
+            except Exception as exc:
+                if not _is_not_found_error(exc):
+                    raise
+                logger.info(
+                    "Strava visual upload: stored activity %s no longer exists; creating a fresh structured copy",
+                    activity_id,
+                )
+                force_new_external_id = True
 
         payload = build_strength_payload(
             workout,
             config=config,
             hr_samples=hr_samples,
             calories=calories,
+            start_offset_seconds=_duplicate_start_offset_seconds(config),
         )
         external_id = _external_id(
             workout,

@@ -194,7 +194,9 @@ def test_upload_refreshes_token_posts_json_and_marks_state(
     assert "avg HR 90 bpm" in upload_call.kwargs["data"]["description"]
     assert "delete" not in upload_call.kwargs["data"]["description"].lower()
     uploaded_json = json.loads(upload_call.kwargs["files"]["file"][1].decode("utf-8"))
+    assert uploaded_json["start_time"] == "2026-04-01T21:01:00+01:00"
     assert uploaded_json["sets"][0]["exercise_type"] == "BARBELL_BENCH_PRESS"
+    assert uploaded_json["sets"][0]["start_time"] == "2026-04-01T21:01:00+01:00"
     assert uploaded_json["streams"] == {"time": [0, 2700], "heartrate": [90, 90]}
     state = store.values["strava_visual_upload_test-workout-123"]
     assert state["activity_id"] == 456
@@ -290,6 +292,56 @@ def test_update_existing_visual_activity_updates_description(sample_workout: dic
     assert "Bench Press (Barbell)" in session.put.call_args.kwargs["json"]["description"]
     assert "delete" not in session.put.call_args.kwargs["json"]["description"].lower()
     session.get.assert_not_called()
+
+
+def test_deleted_existing_visual_activity_creates_fresh_structured_copy(
+    sample_workout: dict,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("STRAVA_BASE_URL", "https://strava.test")
+    monkeypatch.setenv("STRAVA_API_BASE_URL", "https://strava.test/api/v3")
+    monkeypatch.setattr(
+        "hevy2garmin.strava.uuid.uuid4",
+        lambda: SimpleNamespace(hex="abcdef1234567890"),
+    )
+    store = _Store()
+    store.set_app_config(
+        "strava_visual_upload_test-workout-123",
+        {"activity_id": 999, "structured": True},
+    )
+    session = MagicMock()
+    session.post.side_effect = [
+        _Resp({"access_token": "access"}),
+        _Resp({"id": 123, "id_str": "123", "status": "success"}),
+    ]
+    session.put.return_value = _Resp(
+        {},
+        RuntimeError("404 Client Error: Not Found for url"),
+    )
+    session.get.return_value = _Resp(
+        {"id": 123, "id_str": "123", "error": None, "activity_id": 456}
+    )
+
+    result = try_upload_visual_strength(
+        sample_workout,
+        config=_config(),
+        store=store,
+        update_existing=True,
+        session=session,
+    )
+
+    assert result.status == "uploaded"
+    assert result.activity_id == 456
+    assert session.put.call_count == 1
+    assert session.post.call_count == 2
+    upload_call = session.post.call_args_list[1]
+    assert (
+        upload_call.kwargs["data"]["external_id"]
+        == "hevy2garmin-test-workout-123-abcdef123456.json"
+    )
+    state = store.values["strava_visual_upload_test-workout-123"]
+    assert state["activity_id"] == 456
+    assert state["structured"] is True
 
 
 def test_new_visual_upload_failure_does_not_touch_existing_strava_activity(
