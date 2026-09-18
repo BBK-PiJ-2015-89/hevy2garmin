@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -36,6 +36,29 @@ class _Store:
 
     def set_app_config(self, key: str, value: dict) -> None:
         self.values[key] = value
+
+
+
+
+def _stub_fit_builder(monkeypatch):
+    calls = []
+
+    def fake_build_strength_fit_file(workout, *, output_path, config=None, hr_samples=None, start_offset_seconds=0):
+        Path(output_path).write_bytes(b"fit")
+        calls.append({
+            "workout": workout,
+            "output_path": Path(output_path),
+            "config": config,
+            "hr_samples": hr_samples,
+            "start_offset_seconds": start_offset_seconds,
+        })
+        return {"duration_s": 2700, "calories": 123, "avg_hr": None}
+
+    monkeypatch.setattr(
+        "hevy2garmin.strava.build_strength_fit_file",
+        fake_build_strength_fit_file,
+    )
+    return calls
 
 
 def _config(enabled: bool = True) -> dict:
@@ -195,12 +218,13 @@ def test_generate_description_lists_workout_details(sample_workout: dict) -> Non
     assert "delete" not in desc.lower()
 
 
-def test_upload_refreshes_token_posts_json_and_marks_state(
+def test_upload_refreshes_token_posts_fit_and_marks_state(
     sample_workout: dict,
     monkeypatch,
 ) -> None:
     monkeypatch.setenv("STRAVA_BASE_URL", "https://strava.test")
     monkeypatch.setenv("STRAVA_API_BASE_URL", "https://strava.test/api/v3")
+    fit_calls = _stub_fit_builder(monkeypatch)
     session = MagicMock()
     session.post.side_effect = [
         _Resp({"access_token": "access", "refresh_token": "rotated"}),
@@ -227,20 +251,22 @@ def test_upload_refreshes_token_posts_json_and_marks_state(
     assert token_call.args[0] == "https://strava.test/oauth/token"
     assert upload_call.args[0] == "https://strava.test/api/v3/uploads"
     assert upload_call.kwargs["data"]["sport_type"] == "WeightTraining"
-    assert upload_call.kwargs["data"]["data_type"] == "json"
-    assert upload_call.kwargs["data"]["external_id"] == "hevy2garmin-test-workout-123.json"
+    assert upload_call.kwargs["data"]["data_type"] == "fit"
+    assert upload_call.kwargs["data"]["external_id"] == "hevy2garmin-test-workout-123.fit"
     assert "Bench Press (Barbell)" in upload_call.kwargs["data"]["description"]
     assert "Set 1: 60 kg x 10" in upload_call.kwargs["data"]["description"]
     assert "avg HR 90 bpm" in upload_call.kwargs["data"]["description"]
     assert "delete" not in upload_call.kwargs["data"]["description"].lower()
-    uploaded_json = json.loads(upload_call.kwargs["files"]["file"][1].decode("utf-8"))
-    assert uploaded_json["start_time"] == "2026-04-01T21:50:00+01:00"
-    assert uploaded_json["sets"][0]["exercise_type"] == "BENCH_PRESS_GENERIC"
-    assert "start_time" not in uploaded_json["sets"][0]
-    assert "streams" not in uploaded_json
+    assert upload_call.kwargs["files"]["file"] == (
+        "hevy2garmin-test-workout-123.fit",
+        b"fit",
+        "application/octet-stream",
+    )
+    assert fit_calls[0]["start_offset_seconds"] == 3000
     state = store.values["strava_visual_upload_test-workout-123"]
     assert state["activity_id"] == 456
     assert state["structured"] is True
+    assert state["file_type"] == "fit"
 
 
 def test_missing_credentials_is_non_fatal(sample_workout: dict) -> None:
@@ -259,7 +285,7 @@ def test_already_uploaded_is_skipped(sample_workout: dict) -> None:
     store = _Store()
     store.set_app_config(
         "strava_visual_upload_test-workout-123",
-        {"activity_id": 999, "structured": True},
+        {"activity_id": 999, "structured": True, "file_type": "fit"},
     )
     session = MagicMock()
     result = try_upload_visual_strength(
@@ -278,6 +304,7 @@ def test_text_only_fallback_state_does_not_block_structured_upload(
 ) -> None:
     monkeypatch.setenv("STRAVA_BASE_URL", "https://strava.test")
     monkeypatch.setenv("STRAVA_API_BASE_URL", "https://strava.test/api/v3")
+    fit_calls = _stub_fit_builder(monkeypatch)
     store = _Store()
     store.set_app_config(
         "strava_visual_upload_test-workout-123",
@@ -303,13 +330,15 @@ def test_text_only_fallback_state_does_not_block_structured_upload(
     assert result.activity_id == 456
     assert session.post.call_count == 2
     assert store.values["strava_visual_upload_test-workout-123"]["structured"] is True
+    assert store.values["strava_visual_upload_test-workout-123"]["file_type"] == "fit"
+    assert fit_calls[0]["start_offset_seconds"] == 3000
 
 
 def test_update_existing_visual_activity_updates_description(sample_workout: dict) -> None:
     store = _Store()
     store.set_app_config(
         "strava_visual_upload_test-workout-123",
-        {"activity_id": 999, "structured": True},
+        {"activity_id": 999, "structured": True, "file_type": "fit"},
     )
     session = MagicMock()
     session.post.return_value = _Resp({"access_token": "access"})
@@ -334,6 +363,50 @@ def test_update_existing_visual_activity_updates_description(sample_workout: dic
     session.get.assert_not_called()
 
 
+def test_update_existing_json_visual_activity_migrates_to_fit(
+    sample_workout: dict,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("STRAVA_BASE_URL", "https://strava.test")
+    monkeypatch.setenv("STRAVA_API_BASE_URL", "https://strava.test/api/v3")
+    monkeypatch.setattr(
+        "hevy2garmin.strava.uuid.uuid4",
+        lambda: SimpleNamespace(hex="abcdef1234567890"),
+    )
+    _stub_fit_builder(monkeypatch)
+    store = _Store()
+    store.set_app_config(
+        "strava_visual_upload_test-workout-123",
+        {"activity_id": 999, "external_id": "old.json", "structured": True},
+    )
+    session = MagicMock()
+    session.post.side_effect = [
+        _Resp({"access_token": "access"}),
+        _Resp({"id": 123, "id_str": "123", "status": "success"}),
+    ]
+    session.get.return_value = _Resp(
+        {"id": 123, "id_str": "123", "error": None, "activity_id": 456}
+    )
+    session.delete.return_value = _Resp({})
+
+    result = try_upload_visual_strength(
+        sample_workout,
+        config=_config(),
+        store=store,
+        update_existing=True,
+        session=session,
+    )
+
+    assert result.status == "replaced"
+    assert result.activity_id == 456
+    session.delete.assert_called_once()
+    upload_call = session.post.call_args_list[1]
+    assert upload_call.kwargs["data"]["external_id"] == "hevy2garmin-test-workout-123-abcdef123456.fit"
+    state = store.values["strava_visual_upload_test-workout-123"]
+    assert state["file_type"] == "fit"
+    assert state["replaced_activity_id"] == 999
+
+
 def test_deleted_existing_visual_activity_creates_fresh_structured_copy(
     sample_workout: dict,
     monkeypatch,
@@ -344,10 +417,11 @@ def test_deleted_existing_visual_activity_creates_fresh_structured_copy(
         "hevy2garmin.strava.uuid.uuid4",
         lambda: SimpleNamespace(hex="abcdef1234567890"),
     )
+    _stub_fit_builder(monkeypatch)
     store = _Store()
     store.set_app_config(
         "strava_visual_upload_test-workout-123",
-        {"activity_id": 999, "structured": True},
+        {"activity_id": 999, "structured": True, "file_type": "fit"},
     )
     session = MagicMock()
     session.post.side_effect = [
@@ -377,11 +451,12 @@ def test_deleted_existing_visual_activity_creates_fresh_structured_copy(
     upload_call = session.post.call_args_list[1]
     assert (
         upload_call.kwargs["data"]["external_id"]
-        == "hevy2garmin-test-workout-123-abcdef123456.json"
+        == "hevy2garmin-test-workout-123-abcdef123456.fit"
     )
     state = store.values["strava_visual_upload_test-workout-123"]
     assert state["activity_id"] == 456
     assert state["structured"] is True
+    assert state["file_type"] == "fit"
 
 
 def test_new_visual_upload_failure_does_not_touch_existing_strava_activity(
@@ -390,6 +465,7 @@ def test_new_visual_upload_failure_does_not_touch_existing_strava_activity(
 ) -> None:
     monkeypatch.setenv("STRAVA_BASE_URL", "https://strava.test")
     monkeypatch.setenv("STRAVA_API_BASE_URL", "https://strava.test/api/v3")
+    _stub_fit_builder(monkeypatch)
     store = _Store()
     session = MagicMock()
     session.post.side_effect = [
@@ -418,6 +494,7 @@ def test_failed_strava_processing_does_not_touch_existing_strava_activity(
 ) -> None:
     monkeypatch.setenv("STRAVA_BASE_URL", "https://strava.test")
     monkeypatch.setenv("STRAVA_API_BASE_URL", "https://strava.test/api/v3")
+    _stub_fit_builder(monkeypatch)
     store = _Store()
     session = MagicMock()
     session.post.side_effect = [
@@ -448,6 +525,7 @@ def test_replace_existing_falls_back_to_metadata_update_when_upload_is_rejected(
 ) -> None:
     monkeypatch.setenv("STRAVA_BASE_URL", "https://strava.test")
     monkeypatch.setenv("STRAVA_API_BASE_URL", "https://strava.test/api/v3")
+    _stub_fit_builder(monkeypatch)
     store = _Store()
     store.set_app_config(
         "strava_visual_upload_test-workout-123",
@@ -484,6 +562,7 @@ def test_replace_existing_visual_activity_deletes_and_reuploads(
         "hevy2garmin.strava.uuid.uuid4",
         lambda: SimpleNamespace(hex="abcdef1234567890"),
     )
+    _stub_fit_builder(monkeypatch)
     store = _Store()
     store.set_app_config(
         "strava_visual_upload_test-workout-123",
@@ -514,9 +593,10 @@ def test_replace_existing_visual_activity_deletes_and_reuploads(
     _, upload_call = session.post.call_args_list
     assert (
         upload_call.kwargs["data"]["external_id"]
-        == "hevy2garmin-test-workout-123-abcdef123456.json"
+        == "hevy2garmin-test-workout-123-abcdef123456.fit"
     )
     state = store.values["strava_visual_upload_test-workout-123"]
     assert state["activity_id"] == 457
     assert state["structured"] is True
+    assert state["file_type"] == "fit"
     assert state["replaced_activity_id"] == 999

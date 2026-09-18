@@ -1,18 +1,21 @@
 """Optional Strava visual strength upload.
 
 When enabled, this module uploads a second, structured Strava strength activity
-using Strava's JSON strength format. The Garmin sync remains the source of
+using a separate FIT strength activity. The Garmin sync remains the source of
 truth for Garmin Connect; this is only for Strava's exercise/set UI.
 """
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
 import re
+import tempfile
 import time
 import uuid
+from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -20,7 +23,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 
-from hevy2garmin.fit import _parse_timestamp
+from hevy2garmin.fit import _parse_timestamp, generate_fit
 from hevy2garmin.mapper import fit_exercise_strings, lookup_exercise
 
 logger = logging.getLogger("hevy2garmin")
@@ -658,6 +661,7 @@ def _mark_uploaded(
     external_id: str,
     *,
     replaced_activity_id: int | None = None,
+    file_type: str = "fit",
 ) -> None:
     if store is None or not hasattr(store, "set_app_config") or not result.activity_id:
         return
@@ -667,6 +671,7 @@ def _mark_uploaded(
             "upload_id": result.upload_id,
             "external_id": external_id,
             "structured": True,
+            "file_type": file_type,
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
         }
         if replaced_activity_id is not None:
@@ -680,16 +685,76 @@ def _api_base() -> str:
     return (os.environ.get("STRAVA_API_BASE_URL") or _API_BASE_URL).rstrip("/")
 
 
-def _external_id(workout: dict[str, Any], *, unique: bool = False) -> str:
+def _external_id(
+    workout: dict[str, Any],
+    *,
+    unique: bool = False,
+    extension: str = "fit",
+) -> str:
     wid = re.sub(r"[^A-Za-z0-9_.:-]+", "_", str(workout.get("id") or "workout"))
+    ext = re.sub(r"[^A-Za-z0-9]+", "", extension.lower()) or "fit"
     if unique:
-        return f"hevy2garmin-{wid}-{uuid.uuid4().hex[:12]}.json"
-    return f"hevy2garmin-{wid}.json"
+        return f"hevy2garmin-{wid}-{uuid.uuid4().hex[:12]}.{ext}"
+    return f"hevy2garmin-{wid}.{ext}"
 
 
-def _upload_json(
+def _shift_workout_for_duplicate(
+    workout: dict[str, Any],
+    *,
+    start_offset_seconds: int,
+) -> dict[str, Any]:
+    shifted = copy.deepcopy(workout)
+    offset = timedelta(seconds=max(0, int(start_offset_seconds)))
+    for key, alt_key in (("start_time", "startTime"), ("end_time", "endTime")):
+        value = _parse_timestamp(workout.get(key) or workout.get(alt_key))
+        if value is None:
+            continue
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        shifted[key] = _format_iso_z(value + offset)
+    return shifted
+
+
+def _fit_profile_from_config(config: dict[str, Any] | None) -> dict[str, Any]:
+    user_profile = ((config or {}).get("user_profile") or {}) if isinstance(config, dict) else {}
+    timing = ((config or {}).get("timing") or {}) if isinstance(config, dict) else {}
+    return {
+        "weight_kg": user_profile.get("weight_kg", 80.0),
+        "birth_year": user_profile.get("birth_year", 1990),
+        "vo2max": user_profile.get("vo2max", 45.0),
+        "timezone": user_profile.get("timezone", ""),
+        "working_set_s": timing.get("working_set_seconds", 40),
+        "warmup_set_s": timing.get("warmup_set_seconds", 25),
+        "rest_sets_s": timing.get("rest_between_sets_seconds", 75),
+        "rest_exercises_s": timing.get("rest_between_exercises_seconds", 120),
+    }
+
+
+def build_strength_fit_file(
+    workout: dict[str, Any],
+    *,
+    output_path: str | Path,
+    config: dict[str, Any] | None = None,
+    hr_samples: list[Any] | None = None,
+    start_offset_seconds: int = 0,
+) -> dict[str, Any]:
+    """Build the separate Strava FIT strength duplicate."""
+    shifted = _shift_workout_for_duplicate(
+        workout,
+        start_offset_seconds=start_offset_seconds,
+    )
+    fit_hr_samples = hr_samples if _include_optional_upload_details(config) else None
+    return generate_fit(
+        shifted,
+        hr_samples=fit_hr_samples,
+        output_path=str(output_path),
+        profile=_fit_profile_from_config(config),
+    )
+
+
+def _upload_fit(
     token: str,
-    payload: dict[str, Any],
+    fit_path: str | Path,
     *,
     name: str,
     description: str,
@@ -701,15 +766,16 @@ def _upload_json(
         "description": description,
         "trainer": "1",
         "commute": "0",
-        "data_type": "json",
+        "data_type": "fit",
         "sport_type": "WeightTraining",
         "external_id": external_id,
     }
+    path = Path(fit_path)
     files = {
         "file": (
             external_id,
-            json.dumps(payload, separators=(",", ":")).encode("utf-8"),
-            "application/json",
+            path.read_bytes(),
+            "application/octet-stream",
         )
     }
     resp = session.post(
@@ -857,9 +923,10 @@ def try_upload_visual_strength(
 
     try:
         token = refresh_access_token(creds, session=session)
+        existing_file_type = str((structured_state or {}).get("file_type") or "").lower()
         if structured_state and replace_existing:
             replaced_activity_id = int(structured_state["activity_id"])
-        elif structured_state and update_existing:
+        elif structured_state and update_existing and existing_file_type == "fit":
             activity_id = int(structured_state["activity_id"])
             try:
                 _update_activity_metadata(
@@ -879,29 +946,40 @@ def try_upload_visual_strength(
                     activity_id,
                 )
                 force_new_external_id = True
+        elif structured_state and update_existing:
+            replaced_activity_id = int(structured_state["activity_id"])
+            force_new_external_id = True
+            logger.info(
+                "Strava visual upload: replacing older structured activity %s with a FIT copy",
+                replaced_activity_id,
+            )
 
-        payload = build_strength_payload(
-            workout,
-            config=config,
-            hr_samples=hr_samples,
-            calories=calories,
-            start_offset_seconds=(
-                _workout_duration_seconds(workout)
-                + _duplicate_start_offset_seconds(config)
-            ),
+        start_offset_seconds = (
+            _workout_duration_seconds(workout)
+            + _duplicate_start_offset_seconds(config)
         )
         external_id = _external_id(
             workout,
             unique=force_new_external_id or replace_existing,
+            extension="fit",
         )
-        upload = _upload_json(
-            token,
-            payload,
-            name=title,
-            description=description,
-            external_id=external_id,
-            session=session,
-        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            fit_path = Path(tmp_dir) / external_id
+            build_strength_fit_file(
+                workout,
+                output_path=fit_path,
+                config=config,
+                hr_samples=hr_samples,
+                start_offset_seconds=start_offset_seconds,
+            )
+            upload = _upload_fit(
+                token,
+                fit_path,
+                name=title,
+                description=description,
+                external_id=external_id,
+                session=session,
+            )
         upload_id = upload.get("id_str") or upload.get("id")
         if not upload_id:
             raise RuntimeError("Strava did not return an upload id")
