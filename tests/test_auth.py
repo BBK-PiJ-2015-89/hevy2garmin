@@ -461,6 +461,29 @@ class TestGarminLoginEndpoints:
         assert resp.status_code == 200
         assert resp.json()["di_refresh_token"] == "r"
 
+    def test_worker_exchange_proxy_normalizes_raw_di_response(self, client_with_secret) -> None:
+        with patch("hevy2garmin.server._call_garmin_login_worker",
+                   return_value=({"access_token": "t", "refresh_token": "r"}, 200)):
+            resp = client_with_secret.post(
+                "/api/garmin-worker-exchange",
+                json={"ticket": "ST-1"},
+                cookies={"h2g_auth": "test-secret-123"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["di_token"] == "t"
+        assert resp.json()["di_refresh_token"] == "r"
+
+    def test_worker_exchange_proxy_rejects_legacy_oauth_shape(self, client_with_secret) -> None:
+        with patch("hevy2garmin.server._call_garmin_login_worker",
+                   return_value=({"oauth1": {}, "oauth2": {}}, 200)):
+            resp = client_with_secret.post(
+                "/api/garmin-worker-exchange",
+                json={"ticket": "ST-1"},
+                cookies={"h2g_auth": "test-secret-123"},
+            )
+        assert resp.status_code == 502
+        assert "legacy Garmin exchange worker" in resp.json()["error"]
+
 
 @pytest.fixture
 def client_direct_login():

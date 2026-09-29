@@ -668,7 +668,17 @@ def _direct_garmin_login() -> bool:
 
 def _garmin_login_worker_base() -> str:
     raw = os.environ.get("GARMIN_LOGIN_WORKER_URL", "").strip()
-    return (raw or "https://hevy2garmin-exchange-di.gkos.workers.dev").rstrip("/")
+    default = "https://hevy2garmin-exchange-di.gkos.workers.dev"
+    if raw:
+        base = raw.rstrip("/")
+        if base in (
+            "https://hevy2garmin-exchange.gkos.workers.dev",
+            "https://hevy2garmin-exchange.drgkos.workers.dev",
+        ):
+            logger.warning("Ignoring legacy GARMIN_LOGIN_WORKER_URL=%s; DI tokens require the -di worker", base)
+            return default
+        return base
+    return default
 
 
 def _call_garmin_login_worker(path: str, payload: dict[str, str]) -> tuple[dict[str, Any], int]:
@@ -701,6 +711,55 @@ def _call_garmin_login_worker(path: str, payload: dict[str, str]) -> tuple[dict[
     return {
         "status": "error",
         "message": f"Garmin login service returned an unexpected response ({resp.status_code}).",
+    }, 502
+
+
+def _jwt_client_id(token: str) -> str | None:
+    import base64
+    import json as _json
+
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return None
+        payload = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
+        decoded = base64.urlsafe_b64decode(payload.encode("ascii")).decode("utf-8")
+        data = _json.loads(decoded)
+        client_id = data.get("client_id")
+        return client_id if isinstance(client_id, str) and client_id else None
+    except Exception:
+        return None
+
+
+def _normalize_garmin_exchange_response(data: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    """Return only the DI token shape garmin-auth 0.3+ can actually load."""
+    if data.get("error"):
+        return data, 502
+
+    di_token = data.get("di_token") or data.get("access_token")
+    di_refresh_token = data.get("di_refresh_token") or data.get("refresh_token")
+    di_client_id = data.get("di_client_id") or data.get("client_id")
+    if isinstance(di_token, str) and isinstance(di_refresh_token, str):
+        if not isinstance(di_client_id, str) or not di_client_id:
+            di_client_id = _jwt_client_id(di_token) or "GARMIN_CONNECT_MOBILE_ANDROID_DI_2025Q2"
+        normalized = dict(data)
+        normalized["di_token"] = di_token
+        normalized["di_refresh_token"] = di_refresh_token
+        normalized["di_client_id"] = di_client_id
+        return normalized, 200
+
+    if isinstance(data.get("oauth1"), dict) or isinstance(data.get("oauth2"), dict):
+        return {
+            "error": (
+                "Garmin returned the old OAuth token shape. This deployment is pointed at the "
+                "legacy Garmin exchange worker; remove GARMIN_LOGIN_WORKER_URL or set it to "
+                "https://hevy2garmin-exchange-di.gkos.workers.dev, then sign in again for a fresh URL."
+            )
+        }, 502
+
+    keys = ", ".join(sorted(str(k) for k in data.keys())) or "none"
+    return {
+        "error": f"Garmin helper returned an unexpected response. Keys: {keys}. Sign in again for a fresh URL."
     }, 502
 
 
@@ -918,6 +977,8 @@ async def garmin_worker_exchange(request: Request):
         "/exchange",
         {"ticket": ticket},
     )
+    if status_code < 400:
+        data, status_code = _normalize_garmin_exchange_response(data)
     return JSONResponse(data, status_code=status_code)
 
 
