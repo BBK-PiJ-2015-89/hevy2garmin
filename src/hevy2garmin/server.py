@@ -389,7 +389,8 @@ async def check_setup(request: Request, call_next):
     # Setup page and sync endpoints: skip the "is configured?" redirect
     if path in ("/login", "/setup", "/api/sync-one", "/api/cron/sync", "/api/cron/webhook",
                 "/api/setup-actions", "/api/garmin-ticket", "/api/garmin-login",
-                "/api/garmin-login-mfa"):
+                "/api/garmin-login-mfa", "/api/garmin-worker-login",
+                "/api/garmin-worker-login-mfa", "/api/garmin-worker-exchange"):
         response = await call_next(request)
     else:
         # Redirect to setup if not configured
@@ -665,6 +666,44 @@ def _direct_garmin_login() -> bool:
     return os.environ.get("H2G_DIRECT_GARMIN_LOGIN", "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _garmin_login_worker_base() -> str:
+    raw = os.environ.get("GARMIN_LOGIN_WORKER_URL", "").strip()
+    return (raw or "https://hevy2garmin-exchange-di.gkos.workers.dev").rstrip("/")
+
+
+def _call_garmin_login_worker(path: str, payload: dict[str, str]) -> tuple[dict[str, Any], int]:
+    """Relay Garmin login helper calls server-side to avoid browser CORS/network failures."""
+    import requests as req
+
+    try:
+        resp = req.post(
+            f"{_garmin_login_worker_base()}{path}",
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=30,
+        )
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Could not reach the Garmin login service: {str(e)[:160]}",
+        }, 502
+
+    try:
+        data = resp.json()
+    except ValueError:
+        return {
+            "status": "error",
+            "message": f"Garmin login service returned a non-JSON response ({resp.status_code}).",
+        }, 502
+
+    if isinstance(data, dict):
+        return data, resp.status_code
+    return {
+        "status": "error",
+        "message": f"Garmin login service returned an unexpected response ({resp.status_code}).",
+    }, 502
+
+
 @app.get("/setup", response_class=HTMLResponse)
 async def setup_page(request: Request):
     garmin_cooldown = 0
@@ -824,6 +863,63 @@ async def setup_save(
 
 
 # ── Browser-based Garmin auth (ticket exchange) ───────────────────────────
+
+
+@app.post("/api/garmin-worker-login")
+async def garmin_worker_login(request: Request):
+    """Proxy the hosted Garmin login helper through this app for old setup pages."""
+    from fastapi.responses import JSONResponse
+
+    body = await request.json()
+    email = (body.get("email") or "").strip()
+    password = body.get("password") or ""
+    if not email or not password:
+        return JSONResponse({"status": "error", "message": "Email and password required"}, status_code=400)
+
+    data, status_code = await run_in_threadpool(
+        _call_garmin_login_worker,
+        "/login",
+        {"email": email, "password": password},
+    )
+    return JSONResponse(data, status_code=status_code)
+
+
+@app.post("/api/garmin-worker-login-mfa")
+async def garmin_worker_login_mfa(request: Request):
+    """Proxy the hosted Garmin MFA helper through this app for old setup pages."""
+    from fastapi.responses import JSONResponse
+
+    body = await request.json()
+    session_id = (body.get("session_id") or "").strip()
+    code = (body.get("mfa_code") or body.get("code") or "").strip()
+    if not session_id or not code:
+        return JSONResponse({"status": "error", "message": "session_id and code required"}, status_code=400)
+
+    data, status_code = await run_in_threadpool(
+        _call_garmin_login_worker,
+        "/login-mfa",
+        {"session_id": session_id, "mfa_code": code},
+    )
+    return JSONResponse(data, status_code=status_code)
+
+
+@app.post("/api/garmin-worker-exchange")
+async def garmin_worker_exchange(request: Request):
+    """Proxy Garmin ticket exchange through this app for old setup pages."""
+    from fastapi.responses import JSONResponse
+
+    body = await request.json()
+    ticket = (body.get("ticket") or "").strip()
+    if not ticket:
+        return JSONResponse({"error": "ticket required"}, status_code=400)
+
+    data, status_code = await run_in_threadpool(
+        _call_garmin_login_worker,
+        "/exchange",
+        {"ticket": ticket},
+    )
+    return JSONResponse(data, status_code=status_code)
+
 
 @app.post("/api/garmin-ticket")
 async def garmin_ticket_store(request: Request):

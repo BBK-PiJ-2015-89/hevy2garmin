@@ -79,6 +79,9 @@ class TestReverseProxyPrefix:
         """
         resp = client.get("/setup", headers={"X-Forwarded-Prefix": "/apps/hevy2garmin"})
         assert "window.APP_PREFIX + '/api/garmin-ticket'" in resp.text
+        assert "window.APP_PREFIX + '/api/garmin-worker-login'" in resp.text
+        assert "window.APP_PREFIX + '/api/garmin-worker-login-mfa'" in resp.text
+        assert "window.APP_PREFIX + '/api/garmin-worker-exchange'" in resp.text
         for pattern in (
             r"fetch\((['\"])/(?!/)",            # fetch('/…')
             r"=\s*(['\"])/api/(?!/)",           # const url = '/api/…'

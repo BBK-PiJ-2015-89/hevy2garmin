@@ -136,7 +136,6 @@
 </div>
 
 <script>
-const GARMIN_WORKER_BASE = 'https://hevy2garmin-exchange-di.gkos.workers.dev';
 const DIRECT_LOGIN = {{ direct_garmin_login | default(false) | tojson }};
 
 // ── Garmin inline login (preferred UX, no copy-paste) ──────────────────────
@@ -155,7 +154,7 @@ async function garminConnect() {
     btn.disabled = true;
     result.innerHTML = '<span style="color: var(--text-muted);">Connecting to Garmin...</span>';
     try {
-        const url = DIRECT_LOGIN ? (window.APP_PREFIX + '/api/garmin-login') : (GARMIN_WORKER_BASE + '/login');
+        const url = DIRECT_LOGIN ? (window.APP_PREFIX + '/api/garmin-login') : (window.APP_PREFIX + '/api/garmin-worker-login');
         const resp = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -164,7 +163,8 @@ async function garminConnect() {
         const data = await resp.json();
         await handleGarminLoginResponse(data);
     } catch (e) {
-        result.innerHTML = '<span style="color: var(--red);">&#10007; Network error, try again</span>';
+        result.innerHTML = '<span style="color: var(--red);">&#10007; Could not reach the Garmin login helper. Try the manual sign-in below.</span>';
+        revealManualFallback();
     } finally {
         btn.disabled = false;
     }
@@ -185,7 +185,7 @@ async function garminSubmitMfa() {
     btn.disabled = true;
     result.innerHTML = '<span style="color: var(--text-muted);">Verifying code...</span>';
     try {
-        const url = DIRECT_LOGIN ? (window.APP_PREFIX + '/api/garmin-login-mfa') : (GARMIN_WORKER_BASE + '/login-mfa');
+        const url = DIRECT_LOGIN ? (window.APP_PREFIX + '/api/garmin-login-mfa') : (window.APP_PREFIX + '/api/garmin-worker-login-mfa');
         const body = DIRECT_LOGIN
             ? { session_id: garminMfaSessionId, code: code }
             : { session_id: garminMfaSessionId, mfa_code: code };
@@ -197,7 +197,8 @@ async function garminSubmitMfa() {
         const data = await resp.json();
         await handleGarminLoginResponse(data);
     } catch (e) {
-        result.innerHTML = '<span style="color: var(--red);">&#10007; Network error, try again</span>';
+        result.innerHTML = '<span style="color: var(--red);">&#10007; Could not reach the Garmin login helper. Try the manual sign-in below.</span>';
+        revealManualFallback();
     } finally {
         btn.disabled = false;
     }
@@ -331,7 +332,7 @@ async function exchangeTicket() {
         // The "-di" worker is the garmin-auth >= 0.3.0 variant; the legacy
         // `hevy2garmin-exchange` worker stays alive for older deployments.
         // Worker returns {di_token, di_refresh_token, di_client_id, expires_in, ...}
-        const exchResp = await fetch('https://hevy2garmin-exchange-di.gkos.workers.dev/exchange', {
+        const exchResp = await fetch(window.APP_PREFIX + '/api/garmin-worker-exchange', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ticket: ticket })

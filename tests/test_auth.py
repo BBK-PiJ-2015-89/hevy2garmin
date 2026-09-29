@@ -425,6 +425,42 @@ class TestGarminLoginEndpoints:
         comp.assert_called_once_with("sid-1", "123456")
         assert resp.json()["status"] == "success"
 
+    def test_worker_login_proxy(self, client_with_secret) -> None:
+        with patch("hevy2garmin.server._call_garmin_login_worker",
+                   return_value=({"status": "needs_mfa", "session_id": "sid-1"}, 200)) as worker:
+            resp = client_with_secret.post(
+                "/api/garmin-worker-login",
+                json={"email": "e@x.com", "password": "pw"},
+                cookies={"h2g_auth": "test-secret-123"},
+            )
+        worker.assert_called_once_with("/login", {"email": "e@x.com", "password": "pw"})
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "needs_mfa", "session_id": "sid-1"}
+
+    def test_worker_mfa_proxy(self, client_with_secret) -> None:
+        with patch("hevy2garmin.server._call_garmin_login_worker",
+                   return_value=({"status": "success", "di_token": "t"}, 200)) as worker:
+            resp = client_with_secret.post(
+                "/api/garmin-worker-login-mfa",
+                json={"session_id": "sid-1", "mfa_code": "123456"},
+                cookies={"h2g_auth": "test-secret-123"},
+            )
+        worker.assert_called_once_with("/login-mfa", {"session_id": "sid-1", "mfa_code": "123456"})
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "success"
+
+    def test_worker_exchange_proxy(self, client_with_secret) -> None:
+        with patch("hevy2garmin.server._call_garmin_login_worker",
+                   return_value=({"di_token": "t", "di_refresh_token": "r", "di_client_id": "c"}, 200)) as worker:
+            resp = client_with_secret.post(
+                "/api/garmin-worker-exchange",
+                json={"ticket": "ST-1"},
+                cookies={"h2g_auth": "test-secret-123"},
+            )
+        worker.assert_called_once_with("/exchange", {"ticket": "ST-1"})
+        assert resp.status_code == 200
+        assert resp.json()["di_refresh_token"] == "r"
+
 
 @pytest.fixture
 def client_direct_login():
