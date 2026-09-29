@@ -984,8 +984,7 @@ async def garmin_worker_exchange(request: Request):
         "/exchange",
         {"ticket": ticket},
     )
-    if status_code < 400:
-        data, status_code = _normalize_garmin_exchange_response(data)
+    data, status_code = _normalize_garmin_exchange_response(data)
     return JSONResponse(data, status_code=status_code)
 
 

@@ -495,6 +495,17 @@ class TestGarminLoginEndpoints:
         assert resp.status_code == 502
         assert resp.json()["error"] == "ticket expired"
 
+    def test_worker_exchange_proxy_surfaces_non_200_status_message_errors(self, client_with_secret) -> None:
+        with patch("hevy2garmin.server._call_garmin_login_worker",
+                   return_value=({"status": "error", "message": "ticket expired"}, 400)):
+            resp = client_with_secret.post(
+                "/api/garmin-worker-exchange",
+                json={"ticket": "ST-1"},
+                cookies={"h2g_auth": "test-secret-123"},
+            )
+        assert resp.status_code == 502
+        assert resp.json()["error"] == "ticket expired"
+
 
 @pytest.fixture
 def client_direct_login():

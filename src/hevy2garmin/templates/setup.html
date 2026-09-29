@@ -342,6 +342,11 @@ async function exchangeTicket() {
             result.innerHTML = '<span style="font-size: 12px; color: var(--red);">&#10007; ' + exchData.error + '</span>';
             return;
         }
+        if (exchData.message && exchData.status !== 'success') {
+            result.innerHTML = '<span style="font-size: 12px; color: var(--red);"></span>';
+            result.firstChild.textContent = '✗ ' + exchData.message;
+            return;
+        }
         if (!exchData.di_token || !exchData.di_refresh_token || !exchData.di_client_id) {
             const keys = Object.keys(exchData || {}).join(', ') || 'none';
             result.innerHTML = '<span style="font-size: 12px; color: var(--red);"></span>';

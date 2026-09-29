@@ -134,6 +134,7 @@ class TestDirectLoginSuccessPath:
         html = self._setup_html()
         assert "Worker returned unexpected response shape" not in html
         assert "Garmin helper returned unexpected fields" in html
+        assert "exchData.message && exchData.status !== 'success'" in html
         assert "Object.keys(exchData || {})" in html
 
 
