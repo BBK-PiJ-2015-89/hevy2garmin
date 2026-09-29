@@ -130,6 +130,12 @@ class TestDirectLoginSuccessPath:
         html = self._setup_html()
         assert "di_token: data.di_token" in html
 
+    def test_manual_exchange_reports_returned_field_names(self) -> None:
+        html = self._setup_html()
+        assert "Worker returned unexpected response shape" not in html
+        assert "Garmin helper returned unexpected fields" in html
+        assert "Object.keys(exchData || {})" in html
+
 
 class TestTokenStoreSelection:
     """begin() must write the store sync later reads from.

@@ -343,7 +343,9 @@ async function exchangeTicket() {
             return;
         }
         if (!exchData.di_token || !exchData.di_refresh_token || !exchData.di_client_id) {
-            result.innerHTML = '<span style="font-size: 12px; color: var(--red);">&#10007; Worker returned unexpected response shape</span>';
+            const keys = Object.keys(exchData || {}).join(', ') || 'none';
+            result.innerHTML = '<span style="font-size: 12px; color: var(--red);"></span>';
+            result.firstChild.textContent = '✗ Garmin helper returned unexpected fields: ' + keys + '. Sign in again for a fresh URL.';
             return;
         }
         // Step 2: Store tokens on our server (garmin-auth >= 0.3.0 single-file DI format)
