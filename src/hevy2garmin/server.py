@@ -736,6 +736,13 @@ def _normalize_garmin_exchange_response(data: dict[str, Any]) -> tuple[dict[str,
     if data.get("error"):
         return data, 502
 
+    status = data.get("status")
+    message = data.get("message")
+    if isinstance(message, str) and message:
+        if status != "success":
+            return {"error": message}, 502
+        return {"error": f"Garmin helper reported success but returned no DI tokens: {message}"}, 502
+
     di_token = data.get("di_token") or data.get("access_token")
     di_refresh_token = data.get("di_refresh_token") or data.get("refresh_token")
     di_client_id = data.get("di_client_id") or data.get("client_id")
