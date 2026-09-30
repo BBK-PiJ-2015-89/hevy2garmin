@@ -714,6 +714,78 @@ def _call_garmin_login_worker(path: str, payload: dict[str, str]) -> tuple[dict[
     }, 502
 
 
+def _exchange_garmin_service_ticket_direct(ticket: str) -> tuple[dict[str, Any], int]:
+    """Exchange a browser SSO ticket for Garmin DI tokens without the Worker.
+
+    This is only a fallback for the manual paste-URL flow. Credential login and
+    MFA still need the Worker because Garmin often blocks cloud-origin sign-ins.
+    """
+    import base64
+    import requests as req
+
+    client_id = "GARMIN_CONNECT_MOBILE_ANDROID_DI_2025Q2"
+    token_url = "https://diauth.garmin.com/di-oauth2-service/oauth/token"
+    grant_type = "https://connectapi.garmin.com/di-oauth2-service/oauth/grant/service_ticket"
+    service_url = "https://sso.garmin.com/sso/embed"
+    basic_auth = base64.b64encode(f"{client_id}:".encode("utf-8")).decode("ascii")
+    headers = {
+        "Authorization": f"Basic {basic_auth}",
+        "User-Agent": "GCM-Android-5.23",
+        "X-Garmin-User-Agent": (
+            "com.garmin.android.apps.connectmobile/5.23; ; "
+            "Google/sdk_gphone64_arm64/google; Android/33; Dalvik/2.1.0"
+        ),
+        "X-Garmin-Paired-App-Version": "10861",
+        "X-Garmin-Client-Platform": "Android",
+        "X-App-Ver": "10861",
+        "X-Lang": "en",
+        "X-GCExperience": "GC5",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "application/json,text/html;q=0.9,*/*;q=0.8",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Cache-Control": "no-cache",
+    }
+    form = {
+        "client_id": client_id,
+        "service_ticket": ticket,
+        "grant_type": grant_type,
+        "service_url": service_url,
+    }
+    try:
+        resp = req.post(token_url, data=form, headers=headers, timeout=30)
+    except Exception as e:
+        return {"error": f"Direct Garmin ticket exchange failed to connect: {str(e)[:160]}"}, 502
+
+    try:
+        data = resp.json()
+    except ValueError:
+        return {
+            "error": f"Direct Garmin ticket exchange returned a non-JSON response ({resp.status_code})."
+        }, 502
+
+    if not resp.ok:
+        detail = data.get("error_description") or data.get("error") or data.get("message")
+        suffix = f": {detail}" if detail else ""
+        return {"error": f"Direct Garmin ticket exchange failed ({resp.status_code}){suffix}"}, 502
+
+    if not isinstance(data, dict):
+        return {"error": "Direct Garmin ticket exchange returned an unexpected response."}, 502
+
+    access_token = data.get("access_token")
+    refresh_token = data.get("refresh_token")
+    if not isinstance(access_token, str) or not isinstance(refresh_token, str):
+        return {"error": "Direct Garmin ticket exchange response was missing DI tokens."}, 502
+
+    return {
+        "di_token": access_token,
+        "di_refresh_token": refresh_token,
+        "di_client_id": _jwt_client_id(access_token) or client_id,
+        "expires_in": data.get("expires_in"),
+        "refresh_token_expires_in": data.get("refresh_token_expires_in"),
+        "scope": data.get("scope"),
+    }, 200
+
+
 def _jwt_client_id(token: str) -> str | None:
     import base64
     import json as _json
@@ -984,6 +1056,10 @@ async def garmin_worker_exchange(request: Request):
         "/exchange",
         {"ticket": ticket},
     )
+    message = str(data.get("message") or data.get("error") or "")
+    if status_code >= 400 and "non-JSON response (404)" in message:
+        logger.warning("Garmin login Worker unavailable during manual exchange; trying direct DI exchange")
+        data, status_code = await run_in_threadpool(_exchange_garmin_service_ticket_direct, ticket)
     data, status_code = _normalize_garmin_exchange_response(data)
     return JSONResponse(data, status_code=status_code)
 
